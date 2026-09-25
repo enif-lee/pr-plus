@@ -2,10 +2,14 @@
  * Classic IIFE scripts for MAIN/isolated PRPlus, Linear partner boot, shell boot.
  */
 import * as esbuild from 'esbuild';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+// PRPlus.version / ping().version track the shipped manifest.
+const { version } = JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 const entries = [
   {
@@ -39,6 +43,7 @@ for (const { entry, outfile } of entries) {
     platform: 'browser',
     target: 'es2020',
     logLevel: 'warning',
+    define: { __PRP_VERSION__: JSON.stringify(version) },
   });
   console.log('wrote', path.relative(root, outfile));
 }

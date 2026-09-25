@@ -2,12 +2,6 @@
  * Extension-origin shell boot. Host IIFE already ran.
  */
 (function bootShell(global: any) {
-  try {
-    global.chrome?.runtime?.connect?.({ name: 'prp-shell' });
-  } catch {
-    /* ignore */
-  }
-
   function argsFromQuery() {
     const q = new URLSearchParams(global.location?.search || '');
     const number = Number(q.get('number'));

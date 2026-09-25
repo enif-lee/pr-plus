@@ -11,7 +11,11 @@ import {
   bindGithubWebHost,
 } from './sw-enterprise';
 import { isSwMessage, type SwMessage } from '../sw-messages';
-import { handlePageApiMessage, allowExternalSender } from './sw-open-pr';
+import {
+  handlePageApiMessage,
+  allowExternalSender,
+  EXTERNAL_MESSAGE_TYPES,
+} from './sw-open-pr';
 import { handleDetailCacheMessage } from './sw-detail-cache';
 import {
   isAbortError,
@@ -99,6 +103,11 @@ try {
     }
     if (!isSwMessage(message)) {
       return Promise.resolve({ ok: false, error: 'invalid message' });
+    }
+    // Loopback pages get the PRPlus launcher surface only — never PAT-backed
+    // fetch / mutation / token / settings messages.
+    if (!EXTERNAL_MESSAGE_TYPES.has(message.type)) {
+      return Promise.resolve({ ok: false, error: 'not-allowed' });
     }
     return handleMessage(message, sender).catch((err) => ({
       ok: false,

@@ -25,7 +25,9 @@ export type LauncherSession = {
   openedAt: number;
 };
 
+const LAUNCHERS_KEY = 'prpLaunchers';
 const launchers = new Map<string, LauncherSession>();
+let launchersHydrated: Promise<void> | null = null;
 const shellPorts = new Map<number, { postMessage: (msg: object) => void }>();
 const rateBuckets = new Map<string, { n: number; resetAt: number }>();
 
@@ -64,6 +66,17 @@ export function allowExternalSender(sender: {
   return isLoopbackOrigin(String(sender.origin || ''));
 }
 
+/** `onMessageExternal` (loopback web) may only drive open / close / status. */
+export const EXTERNAL_MESSAGE_TYPES: ReadonlySet<string> = new Set([
+  MSG.PING,
+  MSG.OPEN_PR,
+  MSG.CLOSE_PR,
+  MSG.PR_STATUS,
+]);
+
+/** Per origin per minute. `status` is read-only and polled by integrators. */
+const RATE_LIMIT_PER_MIN: Record<string, number> = { open: 10, close: 10, status: 120 };
+
 function rateLimit(origin: string, op: string): boolean {
   const key = `${origin}|${op}`;
   const now = Date.now();
@@ -73,19 +86,123 @@ function rateLimit(origin: string, op: string): boolean {
     return false;
   }
   cur.n += 1;
-  return cur.n > 10;
+  return cur.n > (RATE_LIMIT_PER_MIN[op] ?? 10);
 }
 
 function launcherKey(origin: string): string {
   return origin || '';
 }
 
-function sessionForOrigin(origin: string): LauncherSession | null {
+function sessionArea(): any {
+  return (globalThis as any).chrome?.storage?.session || null;
+}
+
+/** MV3 SW is evicted after idle; registry lives in storage.session. */
+function hydrateLaunchers(): Promise<void> {
+  if (launchersHydrated) return launchersHydrated;
+  launchersHydrated = new Promise<void>((resolve) => {
+    const area = sessionArea();
+    if (!area) return resolve();
+    try {
+      area.get([LAUNCHERS_KEY], (result: any) => {
+        const saved = result?.[LAUNCHERS_KEY];
+        if (saved && typeof saved === 'object') {
+          for (const [k, v] of Object.entries(saved)) {
+            if (!launchers.has(k)) launchers.set(k, v as LauncherSession);
+          }
+        }
+        resolve();
+      });
+    } catch {
+      resolve();
+    }
+  });
+  return launchersHydrated;
+}
+
+function persistLaunchers(): Promise<void> {
+  const area = sessionArea();
+  if (!area) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      area.set({ [LAUNCHERS_KEY]: Object.fromEntries(launchers) }, () => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function sessionForOrigin(origin: string): Promise<LauncherSession | null> {
+  await hydrateLaunchers();
   return launchers.get(launcherKey(origin)) || null;
 }
 
-function putLauncher(session: LauncherSession) {
+async function putLauncher(session: LauncherSession) {
+  await hydrateLaunchers();
   launchers.set(launcherKey(session.callerOrigin), session);
+  await persistLaunchers();
+}
+
+async function deleteLauncher(origin: string) {
+  await hydrateLaunchers();
+  if (launchers.delete(launcherKey(origin))) await persistLaunchers();
+}
+
+function queryTabPrStatus(tabId: number): Promise<any | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, { type: MSG.PR_STATUS }, (res: any) => {
+        void chrome.runtime.lastError;
+        resolve(res && typeof res === 'object' ? res : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function tabExists(tabId: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.get(tabId, (tab: any) => {
+        void chrome.runtime.lastError;
+        resolve(Boolean(tab));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Registry entry only while the render target still shows that PR.
+ * Esc / close button / navigation never reach the SW, so ask the tab.
+ */
+async function liveSessionForOrigin(origin: string): Promise<LauncherSession | null> {
+  const session = await sessionForOrigin(origin);
+  if (!session) return null;
+  let alive = false;
+  if (session.renderTarget === 'extension-shell') {
+    alive = shellPorts.has(session.tabId) || (await tabExists(session.tabId));
+  } else {
+    const res = await queryTabPrStatus(session.tabId);
+    alive = Boolean(
+      res?.open &&
+        String(res.owner || '').toLowerCase() === session.owner.toLowerCase() &&
+        String(res.repo || '').toLowerCase() === session.repo.toLowerCase() &&
+        Number(res.number) === session.number
+    );
+  }
+  if (alive) return session;
+  await deleteLauncher(origin);
+  return null;
+}
+
+async function okStatus(callerOrigin: string) {
+  return {
+    ok: true,
+    status: statusFromSession(await sessionForOrigin(callerOrigin), callerOrigin),
+  };
 }
 
 function statusFromSession(
@@ -268,7 +385,7 @@ async function openOnShell(
 ) {
   let tab = await findShellTab();
   if (tab?.id != null && postToShell(tab.id, { op: 'open', args })) {
-    putLauncher({
+    await putLauncher({
       renderTarget: 'extension-shell',
       tabId: tab.id,
       owner: args.owner,
@@ -279,7 +396,7 @@ async function openOnShell(
       openedAt: Date.now(),
     });
     if (tab.id) chrome.tabs.update(tab.id, { active: true });
-    return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+    return okStatus(callerOrigin);
   }
   tab = await new Promise((resolve, reject) => {
     chrome.tabs.create({ url: shellUrl(args) }, (created: any) => {
@@ -289,7 +406,7 @@ async function openOnShell(
     });
   });
   if (tab.id != null) {
-    putLauncher({
+    await putLauncher({
       renderTarget: 'extension-shell',
       tabId: tab.id,
       owner: args.owner,
@@ -300,7 +417,7 @@ async function openOnShell(
       openedAt: Date.now(),
     });
   }
-  return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+  return okStatus(callerOrigin);
 }
 
 async function senderIsPartnerHostPage(sender?: any): Promise<boolean> {
@@ -325,7 +442,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
   if (source === 'local-host') {
     const tabId = sender?.tab?.id;
     if (tabId != null) {
-      putLauncher({
+      await putLauncher({
         renderTarget: 'opener-embed',
         tabId,
         owner: args.owner,
@@ -336,7 +453,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
         openedAt: Date.now(),
       });
     }
-    return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+    return okStatus(callerOrigin);
   }
 
   if (target === 'opener-embed') {
@@ -345,7 +462,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
     }
     const res = await retryOpenOnTab(sender.tab.id, args);
     if (res?.ok && res.ready && res.hostEnabled) {
-      putLauncher({
+      await putLauncher({
         renderTarget: 'opener-embed',
         tabId: sender.tab.id,
         owner: args.owner,
@@ -355,7 +472,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
         callerOrigin,
         openedAt: Date.now(),
       });
-      return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+      return okStatus(callerOrigin);
     }
     if (res?.ready === false || res?.noReceiver) {
       return { ok: false, error: 'bridge-timeout' };
@@ -378,7 +495,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
   if (autoWantsOverlay) {
     const res = await retryOpenOnTab(sender.tab.id, args);
     if (res?.ok && res.ready && res.hostEnabled) {
-      putLauncher({
+      await putLauncher({
         renderTarget: 'opener-embed',
         tabId: sender.tab.id,
         owner: args.owner,
@@ -388,7 +505,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
         callerOrigin,
         openedAt: Date.now(),
       });
-      return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+      return okStatus(callerOrigin);
     }
   }
 
@@ -400,7 +517,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
     chrome.tabs.update(existing.id, { active: true });
     const res = await retryOpenOnTab(existing.id, args);
     if (res?.ok && res.ready && res.hostEnabled) {
-      putLauncher({
+      await putLauncher({
         renderTarget: 'github-tab',
         tabId: existing.id,
         owner: args.owner,
@@ -410,7 +527,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
         callerOrigin,
         openedAt: Date.now(),
       });
-      return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+      return okStatus(callerOrigin);
     }
     if (res?.hostEnabled === false) return { ok: false, error: 'host-disabled' };
     return { ok: false, error: 'host-timeout' };
@@ -429,7 +546,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
     if (created.id == null) return { ok: false, error: 'no-host-tab' };
     const res = await retryOpenOnTab(created.id, args);
     if (res?.ok && res.ready && res.hostEnabled) {
-      putLauncher({
+      await putLauncher({
         renderTarget: 'github-tab',
         tabId: created.id,
         owner: args.owner,
@@ -439,7 +556,7 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
         callerOrigin,
         openedAt: Date.now(),
       });
-      return { ok: true, status: statusFromSession(sessionForOrigin(callerOrigin), callerOrigin) };
+      return okStatus(callerOrigin);
     }
     if (res?.hostEnabled === false) return { ok: false, error: 'host-disabled' };
     return { ok: false, error: 'host-timeout' };
@@ -460,7 +577,7 @@ export async function handlePageApiMessage(
       if (rateLimit(origin || 'unknown', 'close')) {
         return { ok: false, error: 'rate-limited' };
       }
-      const session = sessionForOrigin(origin);
+      const session = await sessionForOrigin(origin);
       if (!session) return { ok: true };
       if (session.renderTarget === 'extension-shell') {
         postToShell(session.tabId, { op: 'close' });
@@ -471,7 +588,7 @@ export async function handlePageApiMessage(
           /* ignore */
         }
       }
-      launchers.delete(launcherKey(origin));
+      await deleteLauncher(origin);
       return { ok: true };
     }
     case MSG.PR_STATUS: {
@@ -481,7 +598,7 @@ export async function handlePageApiMessage(
       }
       return {
         ok: true,
-        status: statusFromSession(sessionForOrigin(origin), origin),
+        status: statusFromSession(await liveSessionForOrigin(origin), origin),
       };
     }
     case MSG.CONNECTED_SITES_LIST: {
@@ -521,6 +638,23 @@ export async function handlePageApiMessage(
     default:
       return undefined;
   }
+}
+
+try {
+  chrome.tabs.onRemoved.addListener((tabId: number) => {
+    void hydrateLaunchers().then(() => {
+      let changed = false;
+      for (const [k, v] of launchers) {
+        if (v.tabId === tabId) {
+          launchers.delete(k);
+          changed = true;
+        }
+      }
+      if (changed) void persistLaunchers();
+    });
+  });
+} catch {
+  /* tests */
 }
 
 try {

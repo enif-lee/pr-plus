@@ -2,11 +2,14 @@
  * Isolated-world PRPlus bridge. Talks to SW; never uses send() (would stamp
  * page hostname as webHost).
  */
+// Injected by scripts/build-page-api.mjs (manifest version).
+declare var __PRP_VERSION__: string;
+
 (function initPrPlusIsolated(global: any) {
   const CHANNEL = 'prp-page-api';
   const HELLO = 'prp-page-api-hello';
   const ATTR = 'data-prp-api-nonce';
-  const VERSION = '1.10.2';
+  const VERSION = __PRP_VERSION__;
   const MSG = {
     OPEN_PR: 'PR_TREE_OPEN_PR',
     CLOSE_PR: 'PR_TREE_CLOSE_PR',

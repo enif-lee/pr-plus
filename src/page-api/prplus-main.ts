@@ -2,11 +2,14 @@
  * MAIN-world window.PRPlus shim. No chrome.runtime.
  * Built as a classic script (world: MAIN).
  */
+// Injected by scripts/build-page-api.mjs (manifest version).
+declare var __PRP_VERSION__: string;
+
 (function initPrPlusMain(global: any) {
   const CHANNEL = 'prp-page-api';
   const HELLO = 'prp-page-api-hello';
   const ATTR = 'data-prp-api-nonce';
-  const VERSION = '1.10.2';
+  const VERSION = __PRP_VERSION__;
 
   let nonce = '';
   let ready = false;

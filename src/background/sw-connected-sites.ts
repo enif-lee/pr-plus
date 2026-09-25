@@ -73,6 +73,10 @@ export function parseCustomConnectedOrigins(
     host
   );
   if (!ipv4 && !dns) return { ok: false, error: 'invalid' };
+  // `*.com` / `*.io` would grant every site under a TLD.
+  if (wildcard && (ipv4 || !host.includes('.'))) {
+    return { ok: false, error: 'invalid' };
+  }
   if (host === 'github.com' || host.endsWith('.github.com')) {
     return { ok: false, error: 'github' };
   }

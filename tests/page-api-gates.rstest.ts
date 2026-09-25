@@ -14,7 +14,9 @@ import {
 import {
   callerOriginFromSender,
   allowExternalSender,
+  EXTERNAL_MESSAGE_TYPES,
 } from '../src/background/sw-open-pr';
+import { MSG } from '../src/sw-messages';
 import {
   partnerScriptListsExcludeGithubStack,
   urlMatchesConnectedOrigins,
@@ -102,6 +104,53 @@ describe('page-api gates', () => {
     ).toBe(false);
   });
 
+  test('loopback external messages are limited to the PRPlus launcher ops', () => {
+    expect([...EXTERNAL_MESSAGE_TYPES].sort()).toEqual(
+      [MSG.PING, MSG.OPEN_PR, MSG.CLOSE_PR, MSG.PR_STATUS].sort()
+    );
+    for (const type of [
+      MSG.FETCH_PR_DETAIL,
+      MSG.TOKEN_STATUS,
+      MSG.TOKEN_SET,
+      MSG.TOKEN_CLEAR,
+      MSG.CONNECTED_SITES_ADD,
+      MSG.DETAIL_CACHE_GET,
+    ]) {
+      expect(EXTERNAL_MESSAGE_TYPES.has(type)).toBe(false);
+    }
+    const src = fs.readFileSync(
+      path.join(root, 'src/background/sw-handle-message.ts'),
+      'utf8'
+    );
+    const external = src.slice(src.indexOf('onMessageExternal'));
+    expect(external.indexOf('EXTERNAL_MESSAGE_TYPES.has')).toBeGreaterThan(-1);
+    expect(external.indexOf('EXTERNAL_MESSAGE_TYPES.has')).toBeLessThan(
+      external.indexOf('handleMessage(')
+    );
+  });
+
+  test('PRPlus version is injected from manifest, not hard-coded', () => {
+    for (const rel of ['src/page-api/prplus-main.ts', 'src/page-api/prplus-isolated.ts']) {
+      const src = fs.readFileSync(path.join(root, rel), 'utf8');
+      expect(src).toContain('const VERSION = __PRP_VERSION__;');
+      expect(src).not.toMatch(/const VERSION = ['"]\d/);
+    }
+    const build = fs.readFileSync(path.join(root, 'scripts/build-page-api.mjs'), 'utf8');
+    expect(build).toContain('__PRP_VERSION__');
+  });
+
+  test('launcher registry survives SW eviction and re-checks the tab', () => {
+    const src = fs.readFileSync(path.join(root, 'src/background/sw-open-pr.ts'), 'utf8');
+    expect(src).toContain('chrome?.storage?.session');
+    expect(src).toContain('liveSessionForOrigin(origin)');
+    expect(src).toContain('tabs.onRemoved');
+    const host = fs.readFileSync(
+      path.join(root, 'src/host/modules/click-intercept.ts'),
+      'utf8'
+    );
+    expect(host).toContain("message?.type === 'PR_TREE_PR_STATUS'");
+  });
+
   test('Linear issue URL matches connected-site patterns', () => {
     const origins = ['https://linear.app/*', 'https://*.linear.app/*'];
     expect(
@@ -133,6 +182,9 @@ describe('page-api gates', () => {
     });
     expect(parseCustomConnectedOrigins('github.com').ok).toBe(false);
     expect(parseCustomConnectedOrigins('http://intranet.local').ok).toBe(false);
+    expect(parseCustomConnectedOrigins('*.com').ok).toBe(false);
+    expect(parseCustomConnectedOrigins('*.10.0.0.1').ok).toBe(false);
+    expect(parseCustomConnectedOrigins('*.example.com').ok).toBe(true);
     const entry = partnerHostScriptEntry(['https://app.example.com/*']);
     expect(entry?.id).toBe('prp-partner-overlay-host');
     expect(entry?.matches).toEqual(['https://app.example.com/*']);

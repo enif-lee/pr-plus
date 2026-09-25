@@ -266,6 +266,22 @@
           }
           return true;
         }
+        if (message?.type === 'PR_TREE_PR_STATUS') {
+          // SW launcher registry asks the tab: sheet may have closed via Esc / UI.
+          try {
+            sendResponse({
+              ok: true,
+              open: Boolean(current.open),
+              owner: current.owner || null,
+              repo: current.repo || null,
+              number: current.number == null ? null : Number(current.number),
+              page: current.routePage || null,
+            });
+          } catch {
+            /* ignore */
+          }
+          return true;
+        }
         if (message?.type === 'PR_TREE_CLOSE_PR') {
           try {
             closeModal();
