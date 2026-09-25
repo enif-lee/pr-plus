@@ -1,0 +1,9 @@
+@@ -1,6 +1,8 @@
+ export function hello() {
+-  return 'hi';
++  return 'hello world';
+ }
+ 
++export function bye() {
++  return 'bye';
++}

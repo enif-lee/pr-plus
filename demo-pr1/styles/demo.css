@@ -1,0 +1,10 @@
+.demo-header { display: flex; gap: 12px; align-items: center; }
+.demo-file-tree { list-style: none; padding: 0; margin: 0; }
+.demo-file-tree li { display: flex; justify-content: space-between; padding: 4px 8px; }
+.demo-badge { border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+.demo-badge--ok { background: #dafbe1; }
+.demo-badge--warn { background: #fff8c5; }
+.demo-badge--info { background: #ddf4ff; }
+.demo-modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); }
+.demo-modal__panel { margin: 5vh auto; width: min(920px, 92vw); background: #fff; border-radius: 12px; padding: 16px; }
+.demo-comment { border: 1px solid #d0d7de; border-radius: 8px; padding: 10px; margin: 8px 0; }

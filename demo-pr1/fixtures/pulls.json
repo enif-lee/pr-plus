@@ -1,0 +1,5 @@
+[
+  { "number": 1, "title": "demo root", "draft": false },
+  { "number": 2, "title": "demo child", "draft": true },
+  { "number": 3, "title": "demo leaf", "draft": false }
+]
