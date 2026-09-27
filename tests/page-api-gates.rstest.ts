@@ -151,19 +151,21 @@ describe('page-api gates', () => {
     expect(host).toContain("message?.type === 'PR_TREE_PR_STATUS'");
   });
 
-  test('partner overlay isolates keyboard + focus from the host site', () => {
+  test('partner sheet renders in an extension iframe, not the host page', () => {
     const src = fs.readFileSync(path.join(root, 'src/partner/partner.ts'), 'utf8');
-    // pr+ stamps prp-scroll-lock on <html> AND <body>; treating those as pr+ UI
-    // made every host-page event look like ours and disabled the guard.
-    expect(src).toMatch(/HOST_PAGE_CLASSES = new Set\(\[[^\]]*'prp-scroll-lock'/);
-    expect(src).toContain("const KEY_EVENTS = ['keydown', 'keypress', 'keyup']");
-    expect(src).toContain('global.addEventListener(type, onKeyCapture, true)');
-    expect(src).toContain("const FOCUS_EVENTS = ['focusin', 'focusout']");
-    // Focus moves into the sheet on open and is trapped while open.
-    expect(src).toContain('function focusSheet()');
-    expect(src).toContain('new MutationObserver(syncSheetFocus)');
+    // Page scripts must not reach pr+ DOM: no in-page modal host / React mount.
+    expect(src).not.toMatch(/PRModalHost/);
+    expect(src).toContain("getURL('src/shell/shell.html')");
+    expect(src).toContain("const FRAME_ID = 'prp-partner-frame'");
+    // Close only from the frame's own window on the extension origin.
+    expect(src).toMatch(/event\.source !== f\.contentWindow \|\| event\.origin !== extOrigin/);
+    // Synthetic page clicks cannot open pr+.
+    expect(src).toContain('event.isTrusted');
+    // Keys stay off Linear while the frame is open; focus kept in the frame.
     expect(src).toMatch(/addEventListener\(\s*'focusin'/);
-    expect(src).toMatch(/addEventListener\(\s*'focusout'/);
+    for (const name of ['src/pr-modal-host.js', 'src/modal/dist/pr-modal.bundle.js']) {
+      expect([...PARTNER_HOST_JS]).not.toContain(name);
+    }
   });
 
   test('Linear issue URL matches connected-site patterns', () => {
@@ -180,6 +182,18 @@ describe('page-api gates', () => {
     expect(
       urlMatchesConnectedOrigins('https://github.com/rtzr/iac/pull/1911', origins)
     ).toBe(false);
+    // Suffix must be a label boundary, not a string tail.
+    expect(urlMatchesConnectedOrigins('https://evillinear.app/x', origins)).toBe(false);
+  });
+
+  test('loopback patterns match any port; explicit ports must equal', () => {
+    const loop = ['http://localhost/*', 'http://127.0.0.1/*'];
+    expect(urlMatchesConnectedOrigins('http://localhost:3000/app', loop)).toBe(true);
+    expect(urlMatchesConnectedOrigins('http://127.0.0.1:5173/', loop)).toBe(true);
+    expect(urlMatchesConnectedOrigins('https://localhost:3000/', loop)).toBe(false);
+    const ported = ['https://*.corp.example:8443/*'];
+    expect(urlMatchesConnectedOrigins('https://a.corp.example:8443/', ported)).toBe(true);
+    expect(urlMatchesConnectedOrigins('https://a.corp.example/', ported)).toBe(false);
   });
 
   test('custom domain parses to HTTPS match patterns and gets overlay host', () => {
@@ -222,19 +236,12 @@ describe('page-api gates', () => {
     expect(partner).toMatch(/findLinearReviewHrefFromClickPath/);
     expect(partner).toMatch(/isLinearIssuePath/);
     expect(partner).toMatch(/altKey/);
-    const restore = fs.readFileSync(
-      path.join(root, 'src/host/modules/restore-embed-list-focus.ts'),
-      'utf8'
-    );
-    expect(restore).toMatch(/installPartnerToggleWatch/);
-    const hostToggle = fs.readFileSync(
-      path.join(root, 'src/host/modules/host-core-timeline-b.ts'),
-      'utf8'
-    );
-    expect(hostToggle).toMatch(/findLinearReviewTabMount/);
-    expect(hostToggle).toMatch(/prp-linear-open-toggle/);
-    expect(partner).toMatch(/pointerdown/);
-    expect(partner).toMatch(/prp-modal-host/);
+    // Linear review toggle lives in the partner runtime now.
+    expect(partner).toMatch(/findReviewTabMount/);
+    expect(partner).toMatch(/prp-linear-open-toggle/);
+    expect(partner).toContain("addEventListener('pointerdown', onLinkedPrPointer, true)");
+    expect(partner).toContain("addEventListener('click', onLinkedPrPointer, true)");
+    expect(partner).toMatch(/prp-partner-frame/);
     expect(partner).toMatch(/isPrPlusUiEvent/);
     const assets = fs.readFileSync(
       path.join(root, 'src/host/modules/side-fetch-cache-assets.ts'),

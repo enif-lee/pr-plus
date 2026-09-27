@@ -229,6 +229,10 @@ export async function syncPartnerContentScripts(origins?: string[]) {
   return next;
 }
 
+/**
+ * Chrome match-pattern semantics for our stored origins: a pattern without a
+ * port matches any port; `*.host` matches host and its subdomains only.
+ */
 export function urlMatchesConnectedOrigins(
   url: string,
   origins: string[]
@@ -239,16 +243,23 @@ export function urlMatchesConnectedOrigins(
   } catch {
     return false;
   }
-  const originPattern = `${parsed.protocol}//${parsed.host}/*`;
+  const hostname = parsed.hostname.toLowerCase();
   return normalizeConnectedOrigins(origins).some((p) => {
-    if (p === originPattern) return true;
-    if (
-      p.startsWith('https://*.') &&
-      parsed.hostname.endsWith(p.slice('https://*.'.length, -2))
-    ) {
-      return parsed.protocol === 'https:';
+    const m = /^(https?):\/\/([^/]+)\/\*$/.exec(p);
+    if (!m || `${m[1]}:` !== parsed.protocol) return false;
+    let host = m[2].toLowerCase();
+    let port = '';
+    const pm = /^(.+):(\d+)$/.exec(host);
+    if (pm) {
+      host = pm[1];
+      port = pm[2];
     }
-    return false;
+    if (port && port !== parsed.port) return false;
+    if (host.startsWith('*.')) {
+      const base = host.slice(2);
+      return hostname === base || hostname.endsWith(`.${base}`);
+    }
+    return hostname === host;
   });
 }
 

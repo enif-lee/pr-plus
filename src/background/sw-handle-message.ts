@@ -13,7 +13,7 @@ import {
 import { isSwMessage, type SwMessage } from '../sw-messages';
 import {
   handlePageApiMessage,
-  allowExternalSender,
+  allowExternalSenderConnected,
   EXTERNAL_MESSAGE_TYPES,
 } from './sw-open-pr';
 import { handleDetailCacheMessage } from './sw-detail-cache';
@@ -36,9 +36,6 @@ export async function handleMessage(
   if (
     message.type !== MSG.PING &&
     message.type !== MSG.CANCEL_FETCH &&
-    message.type !== MSG.DETAIL_CACHE_GET &&
-    message.type !== MSG.DETAIL_CACHE_SET &&
-    message.type !== MSG.DETAIL_CACHE_DELETE &&
     message.type !== MSG.DETAIL_CACHE_CLEAR
   ) {
     await bindGithubWebHost(message);
@@ -98,9 +95,6 @@ chrome.runtime.onMessage.addListener((message: any, sender: any) => {
 
 try {
   chrome.runtime.onMessageExternal.addListener((message: any, sender: any) => {
-    if (!allowExternalSender(sender)) {
-      return Promise.resolve({ ok: false, error: 'not-allowlisted' });
-    }
     if (!isSwMessage(message)) {
       return Promise.resolve({ ok: false, error: 'invalid message' });
     }
@@ -109,10 +103,16 @@ try {
     if (!EXTERNAL_MESSAGE_TYPES.has(message.type)) {
       return Promise.resolve({ ok: false, error: 'not-allowed' });
     }
-    return handleMessage(message, sender).catch((err) => ({
-      ok: false,
-      error: err?.message || String(err),
-    }));
+    return allowExternalSenderConnected(sender)
+      .then((ok) =>
+        ok
+          ? handleMessage(message, sender)
+          : { ok: false, error: 'not-allowlisted' }
+      )
+      .catch((err) => ({
+        ok: false,
+        error: err?.message || String(err),
+      }));
   });
 } catch {
   /* tests / missing API */

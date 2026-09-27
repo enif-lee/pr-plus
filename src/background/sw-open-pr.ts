@@ -28,7 +28,6 @@ export type LauncherSession = {
 const LAUNCHERS_KEY = 'prpLaunchers';
 const launchers = new Map<string, LauncherSession>();
 let launchersHydrated: Promise<void> | null = null;
-const shellPorts = new Map<number, { postMessage: (msg: object) => void }>();
 const rateBuckets = new Map<string, { n: number; resetAt: number }>();
 
 export function callerOriginFromSender(sender?: {
@@ -64,6 +63,19 @@ export function allowExternalSender(sender: {
   const extId = (globalThis as any).chrome?.runtime?.id;
   if (sender.id && sender.id !== extId) return false;
   return isLoopbackOrigin(String(sender.origin || ''));
+}
+
+/**
+ * Loopback pages may drive pr+ only after the user connected Localhost in the
+ * popup (Connected sites) — `externally_connectable` alone is always on.
+ */
+export async function allowExternalSenderConnected(sender: {
+  origin?: string;
+  id?: string;
+}): Promise<boolean> {
+  if (!allowExternalSender(sender)) return false;
+  const sites = await getConnectedSites();
+  return urlMatchesConnectedOrigins(`${String(sender.origin)}/`, sites.origins);
 }
 
 /** `onMessageExternal` (loopback web) may only drive open / close / status. */
@@ -183,7 +195,7 @@ async function liveSessionForOrigin(origin: string): Promise<LauncherSession | n
   if (!session) return null;
   let alive = false;
   if (session.renderTarget === 'extension-shell') {
-    alive = shellPorts.has(session.tabId) || (await tabExists(session.tabId));
+    alive = await tabExists(session.tabId);
   } else {
     const res = await queryTabPrStatus(session.tabId);
     alive = Boolean(
@@ -332,6 +344,36 @@ async function retryOpenOnTab(
   return last;
 }
 
+/**
+ * Partner iframe (shell.html framed by a Connected site). The shell reports
+ * its direct embedder (location.ancestorOrigins[0]); it must be the tab's own
+ * top-level Connected-site page, so other sites cannot frame pr+.
+ */
+export async function frameEmbedAllowed(message: SwMessage, sender?: any): Promise<boolean> {
+  const shellUrl = chrome.runtime.getURL('src/shell/shell.html');
+  if (!String(sender?.url || '').startsWith(shellUrl)) return false;
+  if (!(Number(sender?.frameId) > 0)) return false;
+  const origin = String(message.origin || '');
+  const tabUrl = String(sender?.tab?.url || '');
+  let tabOrigin = '';
+  try {
+    tabOrigin = new URL(tabUrl).origin;
+  } catch {
+    return false;
+  }
+  if (!origin || origin !== tabOrigin) return false;
+  const sites = await getConnectedSites();
+  return urlMatchesConnectedOrigins(tabUrl, sites.origins);
+}
+
+/** Only GitHub hosts (dotcom, *.ghe.com, registered GHES) get a PR tab. */
+async function isKnownGithubWebHost(host: string): Promise<boolean> {
+  const h = String(host || '').toLowerCase();
+  if (h === 'github.com' || h === 'www.github.com' || h.endsWith('.ghe.com')) return true;
+  const extra = await registeredEnterpriseHosts().catch((): any[] => []);
+  return (extra || []).some((e: any) => String(e || '').toLowerCase() === h);
+}
+
 function createGithubPrTab(args: ReturnType<typeof openArgsFromMessage>) {
   const url = `${githubOriginForHost(args.githubWebHost)}/${args.owner}/${args.repo}/pull/${args.number}`;
   return new Promise<any>((resolve, reject) => {
@@ -343,35 +385,112 @@ function createGithubPrTab(args: ReturnType<typeof openArgsFromMessage>) {
   });
 }
 
-function shellUrl(args: ReturnType<typeof openArgsFromMessage>) {
+/**
+ * shell.html is web-accessible (partner iframe), so any site could navigate a
+ * tab to it with a PR of its choosing. Tab mode only auto-opens query args that
+ * carry a token minted here (storage.session: survives SW restarts, bound to
+ * the first tab that presents it so a reload still works).
+ */
+const SHELL_LAUNCH_KEY = 'prpShellLaunches';
+const SHELL_LAUNCH_TTL_MS = 12 * 60 * 60 * 1000;
+
+function readShellLaunches(): Promise<Record<string, { at: number; tabId: number | null }>> {
+  const area = sessionArea();
+  if (!area) return Promise.resolve({});
+  return new Promise((resolve) => {
+    try {
+      area.get([SHELL_LAUNCH_KEY], (r: any) => resolve(r?.[SHELL_LAUNCH_KEY] || {}));
+    } catch {
+      resolve({});
+    }
+  });
+}
+
+function writeShellLaunches(v: Record<string, unknown>): Promise<void> {
+  const area = sessionArea();
+  if (!area) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      area.set({ [SHELL_LAUNCH_KEY]: v }, () => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function mintShellLaunch(): Promise<string> {
+  const token = (globalThis as any).crypto.randomUUID();
+  const now = Date.now();
+  const all = await readShellLaunches();
+  for (const [k, v] of Object.entries(all)) if (now - v.at > SHELL_LAUNCH_TTL_MS) delete all[k];
+  all[token] = { at: now, tabId: null };
+  await writeShellLaunches(all);
+  return token;
+}
+
+export async function shellLaunchAllowed(message: SwMessage, sender?: any): Promise<boolean> {
+  const shell = chrome.runtime.getURL('src/shell/shell.html');
+  if (!String(sender?.url || '').startsWith(shell) || sender?.frameId !== 0) return false;
+  const tabId = sender?.tab?.id;
+  const token = String(message.launch || '');
+  if (!token || tabId == null) return false;
+  const all = await readShellLaunches();
+  const row = all[token];
+  if (!row || Date.now() - row.at > SHELL_LAUNCH_TTL_MS) return false;
+  if (row.tabId != null) return row.tabId === tabId;
+  row.tabId = tabId;
+  await writeShellLaunches(all);
+  return true;
+}
+
+async function shellUrl(args: ReturnType<typeof openArgsFromMessage>) {
   const u = new URL(chrome.runtime.getURL('src/shell/shell.html'));
   u.searchParams.set('owner', args.owner);
   u.searchParams.set('repo', args.repo);
   u.searchParams.set('number', String(args.number));
   u.searchParams.set('githubWebHost', args.githubWebHost);
-  if (args.page) u.searchParams.set('page', String(args.page));
-  if (args.filePath) u.searchParams.set('filePath', String(args.filePath));
+  for (const k of [
+    'page',
+    'position',
+    'commitSha',
+    'commitEndSha',
+    'filePath',
+    'fileKey',
+    'startLine',
+    'endLine',
+    'side',
+  ] as const) {
+    const v = (args as any)[k];
+    if (v != null && v !== '') u.searchParams.set(k, String(v));
+  }
+  u.searchParams.set('launch', await mintShellLaunch());
   return u.toString();
 }
 
-function postToShell(tabId: number, payload: object): boolean {
-  const port = shellPorts.get(tabId);
-  if (!port) return false;
-  try {
-    port.postMessage(payload);
-    return true;
-  } catch {
-    shellPorts.delete(tabId);
-    return false;
-  }
+/** Shell tabs listen for SHELL_CMD addressed to their own tab id. */
+function postToShell(tabId: number, payload: object): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: MSG.SHELL_CMD, tabId, ...payload }, (res: any) => {
+        void chrome.runtime.lastError;
+        resolve(Boolean(res?.ok));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 async function findShellTab(): Promise<any | null> {
-  const url = chrome.runtime.getURL('src/shell/shell.html') + '*';
+  // chrome-extension:// is not a match-pattern scheme, so tabs.query({ url })
+  // never matches our own pages — filter by prefix instead.
+  const prefix = chrome.runtime.getURL('src/shell/shell.html');
   return new Promise((resolve) => {
     try {
-      chrome.tabs.query({ url }, (tabs: any) => {
-        resolve(tabs?.[0] || null);
+      chrome.tabs.query({}, (tabs: any) => {
+        resolve(
+          (tabs || []).find((t: any) => String(t?.url || '').startsWith(prefix)) || null
+        );
       });
     } catch {
       resolve(null);
@@ -384,7 +503,7 @@ async function openOnShell(
   callerOrigin: string
 ) {
   let tab = await findShellTab();
-  if (tab?.id != null && postToShell(tab.id, { op: 'open', args })) {
+  if (tab?.id != null && (await postToShell(tab.id, { op: 'open', args }))) {
     await putLauncher({
       renderTarget: 'extension-shell',
       tabId: tab.id,
@@ -398,8 +517,9 @@ async function openOnShell(
     if (tab.id) chrome.tabs.update(tab.id, { active: true });
     return okStatus(callerOrigin);
   }
+  const url = await shellUrl(args);
   tab = await new Promise((resolve, reject) => {
-    chrome.tabs.create({ url: shellUrl(args) }, (created: any) => {
+    chrome.tabs.create({ url }, (created: any) => {
       const err = chrome.runtime.lastError;
       if (err || !created) reject(new Error(err?.message || 'shell create failed'));
       else resolve(created);
@@ -541,6 +661,9 @@ export async function handleOpenPr(message: SwMessage, sender?: any) {
     }
   }
 
+  if (!(await isKnownGithubWebHost(args.githubWebHost))) {
+    return { ok: false, error: 'invalid-args' };
+  }
   try {
     const created = await createGithubPrTab(args);
     if (created.id == null) return { ok: false, error: 'no-host-tab' };
@@ -580,7 +703,7 @@ export async function handlePageApiMessage(
       const session = await sessionForOrigin(origin);
       if (!session) return { ok: true };
       if (session.renderTarget === 'extension-shell') {
-        postToShell(session.tabId, { op: 'close' });
+        await postToShell(session.tabId, { op: 'close' });
       } else {
         try {
           chrome.tabs.sendMessage(session.tabId, { type: MSG.CLOSE_PR });
@@ -601,6 +724,10 @@ export async function handlePageApiMessage(
         status: statusFromSession(await liveSessionForOrigin(origin), origin),
       };
     }
+    case MSG.FRAME_ALLOWED:
+      return { ok: true, allowed: await frameEmbedAllowed(message, sender) };
+    case MSG.SHELL_LAUNCH_CHECK:
+      return { ok: true, allowed: await shellLaunchAllowed(message, sender) };
     case MSG.CONNECTED_SITES_LIST: {
       const sites = await getConnectedSites();
       return { ok: true, ...sites, linearMatches: [...LINEAR_MATCHES] };
@@ -657,18 +784,5 @@ try {
   /* tests */
 }
 
-try {
-  chrome.runtime.onConnect.addListener((port: any) => {
-    if (port.name !== 'prp-shell') return;
-    const tabId = port.sender?.tab?.id;
-    if (tabId == null) return;
-    shellPorts.set(tabId, port);
-    port.onDisconnect.addListener(() => {
-      if (shellPorts.get(tabId) === port) shellPorts.delete(tabId);
-    });
-  });
-} catch {
-  /* tests */
-}
 
 

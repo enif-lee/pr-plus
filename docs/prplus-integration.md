@@ -26,7 +26,7 @@ GitHub PR 링크(`https://github.com/{owner}/{repo}/pull/{n}`)를 클릭하면, 
 | 설치 | [Chrome Web Store](https://chromewebstore.google.com/detail/pr+/iohbbnefenodmnlejjkjjkfkhifnabii) 또는 이 저장소 Load unpacked |
 | PAT | 팝업 **Default PAT**(github.com) 또는 Enterprise 호스트 쌍. 토큰이 없으면 오버레이 호스트가 꺼져 `open`이 거절됩니다. |
 | 사이트 허가 | `https://your.example.com/*` 를 Connected sites에 추가. HTTP는 `localhost` / `127.0.0.1`만. |
-| 페이지 권한 | 페이지 JS는 `chrome.runtime`에 접근하지 않습니다. 공개 표면은 `window.PRPlus`뿐입니다. |
+| 페이지 권한 | 공개 표면은 `window.PRPlus`뿐입니다. 예외: Connected sites에 **Localhost**를 등록한 loopback 페이지는 `chrome.runtime.sendMessage(확장 ID, …)`로 open/close/status/ping만 보낼 수 있습니다. |
 
 PAT와 PR 상세 캐시는 **확장 서비스 워커**가 소유합니다. 페이지 origin IndexedDB나 여러분 서버로 토큰이 내려가지 않습니다.
 
@@ -51,7 +51,7 @@ PAT와 PR 상세 캐시는 **확장 서비스 워커**가 소유합니다. 페�
 | `github.com` | 거절 (이미 기본 포함) |
 | `http://intranet` | 거절 (커스텀은 HTTPS만) |
 
-등록된 모든 사이트는 Linear와 같이 **오버레이 호스트**를 받습니다 (`window.PRPlus` + GitHub PR 클릭 가로채기). GitHub 리스트/온보딩 스택은 주입되지 않습니다.
+등록된 모든 사이트는 Linear와 같이 **오버레이 호스트**를 받습니다 (`window.PRPlus` + GitHub PR 클릭 가로채기). 시트는 페이지 DOM이 아니라 확장 origin iframe(`shell.html`)에 렌더링되므로, 여러분의 페이지 스크립트는 PR 내용을 읽거나 시트 버튼을 조작할 수 없습니다. GitHub 리스트/온보딩 스택은 주입되지 않습니다.
 
 ---
 
@@ -82,7 +82,7 @@ if (!prplus) {
 런타임 힌트(선택):
 
 - `document.documentElement.getAttribute('data-prp-runtime') === 'partner'` — 오버레이 호스트가 이 탭에서 돌고 있음
-- `PRPlus.version` — 문자열, 예: `"1.10.2"`
+- `PRPlus.version` — 문자열, 예: `"1.11.2"`
 
 `PRPlus`가 없으면 기능 플래그를 끄거나 “pr+에서 열기” 버튼을 숨기세요. 확장 미설치를 여러분의 장애로 취급하지 마세요.
 
@@ -285,7 +285,7 @@ await PRPlus.open({
 ## 7. UX 권장
 
 - **명시적 버튼**과 자동 링크 가로채기를 같이 쓰면 됩니다. 둘 다 같은 오버레이입니다.
-- 오버레이가 열린 동안 Linear/보드 SPA가 라우트만 바꿔도 세션은 유지됩니다. 호스트 노드가 통째로 지워지면 remount됩니다.
+- 오버레이가 열린 동안 Linear/보드 SPA가 라우트만 바꿔도 세션은 유지됩니다. 오버레이 iframe(`#prp-partner-frame`)이 지워지면 닫힌 것으로 처리됩니다.
 - “GitHub에서 열기”는 모달 헤더에 있습니다. 제품에서 별도 `window.open(htmlUrl)`을 강제할 필요는 없습니다.
 - 캐시는 확장 SW IndexedDB를 공유합니다. 같은 PR을 GitHub에서 한 번 열었으면 파트너 탭 재오픈이 빨라집니다.
 

@@ -1,58 +1,58 @@
 /**
- * Linear partner boot. Host IIFE already ran (PARTNER_HOST_JS order).
- * Overlay only; enable after token/prefs evaluation.
- * Capture-phase click on GitHub PR links and Linear issue Diffs/review cards
- * opens pr+. Opt/Alt+click is native Linear (or GitHub).
+ * Connected-site partner boot (Linear, Jira, custom hosts).
+ *
+ * The pr+ sheet never mounts in the host page: it renders in an iframe of the
+ * extension shell (`src/shell/shell.html`), so page scripts cannot read PR
+ * content or drive merge/review buttons. This script only finds GitHub PR
+ * links / Linear review cards, owns the iframe, and answers SW open/status/
+ * close for this tab. Opt/Alt+click stays native.
  */
 (function bootPartner(global: any) {
+  const FRAME_ID = 'prp-partner-frame';
+  const TOGGLE_ID = 'prp-gh-open-toggle';
+  const FRAME_PARAMS = [
+    'owner',
+    'repo',
+    'number',
+    'githubWebHost',
+    'page',
+    'position',
+    'commitSha',
+    'commitEndSha',
+    'filePath',
+    'fileKey',
+    'startLine',
+    'endLine',
+    'side',
+  ];
   let lastOpenKey = '';
   let lastOpenAt = 0;
   const REVIEW_CACHE_PREFIX = 'prp:linrev:';
+  /** Token + pluginEnabled evaluated (SW open waits on this). */
+  let evaluated = false;
+  let enabled = false;
+  /** PR currently shown in the frame (null when closed). */
+  let framePr: any = null;
+  /** Page scroll lock owned by the frame (restored exactly once). */
+  let scrollLocked = false;
+  let prevHtmlOverflow = '';
 
   function endpoints() {
     return global.PRGithubEndpoints || null;
+  }
+
+  function frameEl(): any {
+    return global.document.getElementById(FRAME_ID);
   }
 
   function isPrPlusUiEvent(event: any): boolean {
     const path =
       typeof event?.composedPath === 'function' ? event.composedPath() : [];
     const nodes = path.length ? path : [event?.target];
-    for (const n of nodes) {
-      if (!n) continue;
-      const id = String(n.id || '');
-      if (
-        id === 'prp-modal-host' ||
-        id === 'prp-page-embed' ||
-        id === 'prp-modal-root' ||
-        id === 'prp-gh-open-toggle'
-      ) {
-        return true;
-      }
-      if (n.getAttribute && n.getAttribute('data-prp-gh-toggle') === '1') {
-        return true;
-      }
-      const cls = n.classList;
-      if (
-        cls &&
-        typeof cls.contains === 'function' &&
-        (cls.contains('prp-overlay') ||
-          cls.contains('prp-shell') ||
-          cls.contains('prp-header') ||
-          cls.contains('prp-gh-open-toggle'))
-      ) {
-        return true;
-      }
-      if (typeof n.closest === 'function') {
-        if (
-          n.closest(
-            '#prp-modal-host, #prp-page-embed, .prp-overlay, .prp-shell, #prp-gh-open-toggle, [data-prp-gh-toggle]'
-          )
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return nodes.some((n: any) => {
+      const id = String(n?.id || '');
+      return id === FRAME_ID || id === TOGGLE_ID;
+    });
   }
 
   function clickPath(event: any) {
@@ -61,16 +61,24 @@
     return path.length ? path : [event?.target];
   }
 
+  function inEditable(event: any): boolean {
+    const t = event?.target;
+    const el = t?.nodeType === 1 ? t : t?.parentElement;
+    return Boolean(el?.closest?.('[contenteditable]:not([contenteditable="false"])'));
+  }
+
   function findPrFromEvent(event: any) {
     const ep = endpoints();
-    if (typeof ep?.findGithubPullFromClickPath !== 'function') {
-      if (typeof ep?.parseGithubPullUrl === 'function') {
-        const t = event?.target;
-        const href =
-          (t && t.getAttribute && t.getAttribute('href')) || t?.href || null;
-        return ep.parseGithubPullUrl(href, global.location?.href);
-      }
-      return null;
+    // Editors: only a real <a> counts (no "unique PR link nearby" heuristic),
+    // so clicking text next to a PR link still places the caret.
+    if (inEditable(event) || typeof ep?.findGithubPullFromClickPath !== 'function') {
+      const a = clickPath(event).find(
+        (n: any) => n?.tagName === 'A' && n.getAttribute?.('href')
+      );
+      const href = a ? a.getAttribute('href') || a.href : null;
+      return href && typeof ep?.parseGithubPullUrl === 'function'
+        ? ep.parseGithubPullUrl(href, global.location?.href)
+        : null;
     }
     return ep.findGithubPullFromClickPath(clickPath(event), {
       base: global.location?.href,
@@ -85,39 +93,100 @@
     });
   }
 
+  function frameUrl(args: any): string {
+    const u = new URL(global.chrome.runtime.getURL('src/shell/shell.html'));
+    for (const k of FRAME_PARAMS) {
+      const v = args?.[k];
+      if (v != null && v !== '') u.searchParams.set(k, String(v));
+    }
+    if (!u.searchParams.get('githubWebHost')) u.searchParams.set('githubWebHost', 'github.com');
+    return u.toString();
+  }
+
+  function openFrame(args: any): boolean {
+    if (!enabled) return false;
+    if (!args?.owner || !args?.repo || !(Number(args.number) > 0)) return false;
+    const doc = global.document;
+    let f = frameEl();
+    if (!f) {
+      f = doc.createElement('iframe');
+      f.id = FRAME_ID;
+      f.setAttribute('title', 'pr+');
+      f.setAttribute('allow', 'clipboard-write');
+      f.style.cssText =
+        'position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;' +
+        'background:transparent;color-scheme:normal;z-index:2147483000;';
+      doc.documentElement.appendChild(f);
+    }
+    if (!scrollLocked) {
+      prevHtmlOverflow = doc.documentElement.style.overflow || '';
+      doc.documentElement.style.overflow = 'hidden';
+      scrollLocked = true;
+    }
+    f.src = frameUrl(args);
+    framePr = {
+      owner: String(args.owner),
+      repo: String(args.repo),
+      number: Number(args.number),
+      page: args.page || null,
+    };
+    removeToggle();
+    try {
+      f.focus();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  function closeFrame() {
+    frameEl()?.remove();
+    if (scrollLocked) {
+      global.document.documentElement.style.overflow = prevHtmlOverflow;
+      scrollLocked = false;
+    }
+    framePr = null;
+    ensureToggle();
+  }
+
+  /** The page (or an SPA re-render) removed our iframe: treat as closed. */
+  function syncFrameGone() {
+    if ((framePr || scrollLocked) && !frameEl()) closeFrame();
+  }
+
+  // Shell iframe → close. Only the frame's own window, from the extension origin.
+  try {
+    const extOrigin = new URL(global.chrome.runtime.getURL('')).origin;
+    global.addEventListener('message', (event: any) => {
+      const f = frameEl();
+      if (!f || event.source !== f.contentWindow || event.origin !== extOrigin) return;
+      if (event.data?.type === 'prp-frame-close') closeFrame();
+    });
+  } catch {
+    /* ignore */
+  }
+
   function openOverlay(parsed: any) {
-    const host = global.PRModalHost;
-    if (host && typeof host.openModal === 'function') {
-      if (typeof host.isEnabled === 'function' && !host.isEnabled()) {
-        return false;
-      }
-      const key = `${parsed.githubWebHost || 'github.com'}/${parsed.owner}/${parsed.repo}/${parsed.number}`;
-      const now = Date.now();
-      if (key === lastOpenKey && now - lastOpenAt < 500) return true;
-      lastOpenKey = key;
-      lastOpenAt = now;
-      void host.openModal({
+    const key = `${parsed.githubWebHost || 'github.com'}/${parsed.owner}/${parsed.repo}/${parsed.number}`;
+    const now = Date.now();
+    if (key === lastOpenKey && now - lastOpenAt < 500) return true;
+    if (!openFrame(parsed)) return false;
+    lastOpenKey = key;
+    lastOpenAt = now;
+    try {
+      global.chrome?.runtime?.sendMessage?.({
+        type: 'PR_TREE_OPEN_PR',
         owner: parsed.owner,
         repo: parsed.repo,
         number: parsed.number,
-        presentation: 'modal',
+        githubWebHost: parsed.githubWebHost,
+        target: 'opener-embed',
+        source: 'local-host',
       });
-      try {
-        global.chrome?.runtime?.sendMessage?.({
-          type: 'PR_TREE_OPEN_PR',
-          owner: parsed.owner,
-          repo: parsed.repo,
-          number: parsed.number,
-          githubWebHost: parsed.githubWebHost,
-          target: 'opener-embed',
-          source: 'local-host',
-        });
-      } catch {
-        /* ignore */
-      }
-      return true;
+    } catch {
+      /* ignore */
     }
-    return false;
+    return true;
   }
 
   function cacheKey(path: string) {
@@ -314,10 +383,14 @@
   }
 
   function onLinkedPrPointer(event: any) {
+    // Page scripts cannot open pr+ by dispatching synthetic clicks.
+    if (!event.isTrusted || !enabled) return;
     if (event.defaultPrevented) return;
     if (event.button != null && event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (isPrPlusUiEvent(event)) return;
+    // pointerdown in an editor would block caret placement; act on click only.
+    if (event.type === 'pointerdown' && inEditable(event)) return;
 
     const github = findPrFromEvent(event);
     if (github) {
@@ -341,6 +414,7 @@
     if (typeof event.stopImmediatePropagation === 'function') {
       event.stopImmediatePropagation();
     }
+    if (event.type !== 'click') return;
     void resolveLinearReviewToGithub(reviewHref).then((pr) => {
       if (pr && openOverlay(pr)) return;
       try {
@@ -366,148 +440,147 @@
   }
 
   /**
-   * Keyboard isolation while the sheet is open. Linear binds single-key
-   * shortcuts (`c` create issue, `x` select, Esc, …) on document/body, so
-   * keys typed at the sheet — or with focus stranded on the Linear page —
-   * must not reach them. pr+ hotkeys listen on window capture and still run
-   * (stopPropagation keeps the other listeners on the same currentTarget).
+   * Linear review page: "pr+" control right of Overview / Diff.
    */
-  const KEY_EVENTS = ['keydown', 'keypress', 'keyup'];
+  function reviewPagePull() {
+    const ep = endpoints();
+    if (!ep?.isLinearReviewPath?.(global.location?.pathname)) return null;
+    const found = uniqueGithubPullsIn(global.document);
+    return found.length === 1 ? found[0] : null;
+  }
 
-  function overlayOpen(): boolean {
+  function findReviewTabMount() {
+    const doc = global.document;
+    const links = Array.from(doc.querySelectorAll('a[href*="/review/"]')) as any[];
+    const overview = links.find((a) => /^\s*Overview\s*$/i.test(String(a.textContent || '')));
+    const diff = links.find((a) => /^\s*Diff\s*$/i.test(String(a.textContent || '')));
+    if (!overview || !diff) return null;
+    let el = overview.parentElement;
+    for (let i = 0; i < 8 && el; i++) {
+      if (el.contains(diff) && el.children.length >= 2 && el.children.length <= 8) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function openWithLabel(): string {
     try {
-      return Boolean(global.document.querySelector('#prp-modal-host .prp-overlay'));
+      const pure = global.PRModalI18n;
+      const locale =
+        global.document.documentElement.getAttribute('lang') ||
+        global.navigator?.language ||
+        'en';
+      const msg = pure?.formatMessage?.('open_with_prp', locale);
+      if (msg && msg !== 'open_with_prp') return msg;
     } catch {
-      return false;
+      /* fall through */
     }
+    return 'Open with pr+';
   }
 
-  // Utility classes pr+ stamps on the host page's <html>/<body>, not pr+ UI
-  // (SCROLL_LOCK_CLASS, PAGE_EMBED_ACTIVE_CLASS, Opt-hint root class).
-  const HOST_PAGE_CLASSES = new Set(['prp-scroll-lock', 'prp-embed-active', 'prp-opt-hints']);
+  function removeToggle() {
+    global.document.getElementById(TOGGLE_ID)?.remove();
+  }
 
-  function isPrPlusNode(n: any): boolean {
-    if (!n || n.nodeType !== 1) return false;
-    if (String(n.id || '').startsWith('prp-')) return true;
-    const cls = n.classList;
-    if (!cls) return false;
-    for (const c of cls) {
-      if (String(c).startsWith('prp-') && !HOST_PAGE_CLASSES.has(String(c))) return true;
+  function ensureToggle() {
+    const pr = enabled && !framePr ? reviewPagePull() : null;
+    const mount = pr ? findReviewTabMount() : null;
+    if (!pr || !mount) {
+      if (!pr) removeToggle();
+      return;
     }
-    return false;
+    let btn = global.document.getElementById(TOGGLE_ID);
+    if (!btn) {
+      btn = global.document.createElement('button');
+      btn.id = TOGGLE_ID;
+      btn.type = 'button';
+      btn.className = 'prp-gh-open-toggle prp-linear-open-toggle';
+      btn.textContent = 'pr+';
+      btn.addEventListener('click', (event: any) => {
+        if (!event.isTrusted) return;
+        event.preventDefault();
+        const cur = reviewPagePull();
+        if (cur) openOverlay({ ...cur, page: 'conversation' });
+      });
+    }
+    const label = openWithLabel();
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    if (btn.parentElement !== mount) mount.appendChild(btn);
   }
 
-  function eventInPrPlus(event: any): boolean {
-    const path =
-      typeof event?.composedPath === 'function' ? event.composedPath() : [event?.target];
-    return path.some((n: any) => isPrPlusNode(n));
-  }
-
-  /** Focus stranded on Linear (or body): stop before document/target handlers. */
-  function onKeyCapture(event: any) {
-    if (!overlayOpen() || eventInPrPlus(event)) return;
-    event.stopPropagation();
-  }
-
-  /** Keys inside the sheet / its body portals: React already ran; stop bubbling. */
-  function onKeyBubble(event: any) {
-    if (!overlayOpen() || !eventInPrPlus(event)) return;
-    event.stopPropagation();
-  }
-
-  // Linear also reacts to focus moving outside its app and pulls it back.
-  const FOCUS_EVENTS = ['focusin', 'focusout'];
-
+  /**
+   * Keys go to the focused iframe, so Linear never sees them. Keep focus in
+   * the frame while it is open (Linear pulls focus back to its app).
+   */
   try {
-    for (const type of KEY_EVENTS) {
-      global.addEventListener(type, onKeyCapture, true);
-    }
-    for (const type of [...KEY_EVENTS, ...FOCUS_EVENTS]) {
-      global.document.documentElement.addEventListener(type, onKeyBubble, false);
+    global.document.addEventListener(
+      'focusin',
+      (event: any) => {
+        const f = frameEl();
+        if (!f || event.target === f) return;
+        try {
+          f.focus();
+        } catch {
+          /* ignore */
+        }
+      },
+      true
+    );
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      global.addEventListener(
+        type,
+        (event: any) => {
+          if (frameEl()) event.stopPropagation();
+        },
+        true
+      );
     }
   } catch {
     /* ignore */
   }
 
-  /**
-   * Linear's shortcut listener runs on window capture ahead of ours and only
-   * skips events targeted outside its app, so focus must live in the sheet
-   * while it is open (modal focus trap).
-   */
-  /** @returns true once focus is inside pr+ UI. */
-  function focusSheet(): boolean {
-    if (!overlayOpen()) return false;
-    const active = global.document.activeElement;
-    if (active && eventInPrPlus({ composedPath: () => pathOf(active) })) return true;
-    const sheet = global.document.querySelector('#prp-modal-host .prp-modal');
-    if (!sheet) return false;
-    if (!sheet.hasAttribute('tabindex')) sheet.setAttribute('tabindex', '-1');
-    try {
-      sheet.focus({ preventScroll: true });
-    } catch {
-      /* ignore */
-    }
-    return global.document.activeElement === sheet;
-  }
-
-  function pathOf(node: any): any[] {
-    const out: any[] = [];
-    for (let n = node; n; n = n.parentNode) out.push(n);
-    return out;
-  }
-
-  // Overlay mounts before the sheet renders: keep trying until focus lands.
-  let focusPending = true;
-  function syncSheetFocus() {
-    if (!overlayOpen()) {
-      focusPending = true;
-      return;
-    }
-    if (focusPending && focusSheet()) focusPending = false;
-  }
-
+  /** SW → this tab (opener-embed open, launcher liveness, page-api close). */
   try {
-    new MutationObserver(syncSheetFocus).observe(global.document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-    global.document.addEventListener(
-      'focusin',
-      (event: any) => {
-        if (!overlayOpen() || eventInPrPlus(event)) return;
-        // Put focus back where it was inside the sheet, else on the sheet.
-        const prev = event.relatedTarget;
-        if (prev && eventInPrPlus({ composedPath: () => pathOf(prev) })) {
-          try {
-            prev.focus({ preventScroll: true });
-            if (global.document.activeElement === prev) return;
-          } catch {
-            /* ignore */
-          }
+    global.chrome?.runtime?.onMessage?.addListener((message: any, _sender: any, sendResponse: any) => {
+      if (message?.type === 'PR_TREE_OPEN_PR') {
+        if (!evaluated) sendResponse({ ok: true, ready: false });
+        else if (!enabled) {
+          sendResponse({ ok: false, ready: true, hostEnabled: false, reason: 'plugin-disabled' });
+        } else {
+          const opened = openFrame(message);
+          sendResponse(
+            opened
+              ? { ok: true, ready: true, hostEnabled: true }
+              : { ok: false, ready: true, hostEnabled: true, error: 'invalid-args' }
+          );
         }
-        focusSheet();
-      },
-      true
-    );
-    // Blur to <body> (Esc in a composer, removed node) fires no focusin.
-    global.document.addEventListener(
-      'focusout',
-      (event: any) => {
-        if (!overlayOpen() || event.relatedTarget || !eventInPrPlus(event)) return;
-        global.setTimeout(() => {
-          const active = global.document.activeElement;
-          if (!active || active === global.document.body) focusSheet();
-        }, 0);
-      },
-      true
-    );
+        return false;
+      }
+      if (message?.type === 'PR_TREE_PR_STATUS') {
+        syncFrameGone();
+        sendResponse({
+          ok: true,
+          open: Boolean(framePr),
+          owner: framePr?.owner ?? null,
+          repo: framePr?.repo ?? null,
+          number: framePr?.number ?? null,
+          page: framePr?.page ?? null,
+        });
+        return false;
+      }
+      if (message?.type === 'PR_TREE_CLOSE_PR') {
+        closeFrame();
+        sendResponse({ ok: true });
+        return false;
+      }
+      return false;
+    });
   } catch {
     /* ignore */
   }
 
   async function evalFeatures() {
-    const host = global.PRModalHost;
-    if (!host || typeof host.setEnabled !== 'function') return;
     let configured = false;
     let pluginEnabled = true;
     try {
@@ -526,7 +599,19 @@
     } catch {
       pluginEnabled = true;
     }
-    host.setEnabled(configured && pluginEnabled);
+    enabled = configured && pluginEnabled;
+    evaluated = true;
+    if (!enabled) closeFrame();
+    ensureToggle();
+  }
+
+  try {
+    global.setInterval(() => {
+      syncFrameGone();
+      ensureToggle();
+    }, 800);
+  } catch {
+    /* ignore */
   }
 
   void evalFeatures();

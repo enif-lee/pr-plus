@@ -22,6 +22,8 @@
   }
 
   function resolveLinearReviewPrTarget() {
+    // Linear review pages are handled by src/partner (iframe); never on github.com.
+    if (HOST_RUNTIME !== 'partner') return null;
     try {
       const ep = (globalThis as any).PRGithubEndpoints;
       if (!ep?.isLinearReviewPath?.(location.pathname)) return null;
