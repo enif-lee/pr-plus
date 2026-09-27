@@ -720,7 +720,7 @@ export function MarkdownComposer({
             ? createPortal(
                 <ul
                   ref={menuRef}
-                  className={`prp-composer-menu prp-composer-menu--portal${
+                  className={`prp-portal prp-composer-menu prp-composer-menu--portal${
                     menu.kind === 'emoji' ? ' prp-composer-menu--emoji' : ''
                   }`}
                   role="listbox"

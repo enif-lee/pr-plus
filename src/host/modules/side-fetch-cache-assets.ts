@@ -54,7 +54,7 @@
    * @param {string} key
    * @param {number} [ms]
    */
-  async function peekDetailIdb(key: any, ms = 400) {
+  async function peekDetailIdb(key: any, ms = 800) {
     if (typeof detailCache.peekAsync !== 'function') return emptyPeek();
     try {
       const result = await Promise.race([

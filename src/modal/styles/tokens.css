@@ -6,9 +6,10 @@
 
 /* pr+ modal — GitHub-themed, shadcn-inspired, theme-aware (not forced dark) */
 
-/* Document scroll lock while modal open (see scroll-lock.ts) */
-html.prp-scroll-lock,
-html.prp-scroll-lock body {
+/* Document scroll lock while modal open (see scroll-lock.ts).
+ * html only: overflow on body too makes body a scroll container, and GitHub's
+ * sticky list sidebar then pins to the unscrolled body and jumps by scrollY. */
+html.prp-scroll-lock {
   overflow: hidden !important;
   overscroll-behavior: none;
 }

@@ -397,7 +397,7 @@
 
 
     const idbHydrateP = !fromCache
-      ? peekDetailIdb(key, 400).then((idbPeek) => {
+      ? peekDetailIdb(key).then((idbPeek) => {
           if (gen !== detailFetchGen) return null;
           if (
             !(

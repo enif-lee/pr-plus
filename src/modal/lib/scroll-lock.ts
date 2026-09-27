@@ -8,7 +8,6 @@ export const SCROLL_LOCK_CLASS = 'prp-scroll-lock';
 
 export type ScrollLockSnapshot = {
   htmlOverflow: string;
-  bodyOverflow: string;
   bodyPaddingRight: string;
   htmlHadClass: boolean;
   bodyHadClass: boolean;
@@ -29,6 +28,8 @@ export function measureScrollbarWidth(
 
 /**
  * Lock document scroll. Returns a snapshot for restoreScrollLock.
+ * Only <html> gets overflow:hidden — also hiding body's overflow turns body into
+ * a scroll container and breaks the host page's position:sticky elements.
  * Compensates body padding-right for scrollbar width to reduce layout jump.
  */
 export function applyScrollLock(
@@ -40,7 +41,6 @@ export function applyScrollLock(
   const body = doc.body;
   const snap: ScrollLockSnapshot = {
     htmlOverflow: html.style.overflow || '',
-    bodyOverflow: body.style.overflow || '',
     bodyPaddingRight: body.style.paddingRight || '',
     htmlHadClass: html.classList.contains(SCROLL_LOCK_CLASS),
     bodyHadClass: body.classList.contains(SCROLL_LOCK_CLASS),
@@ -49,7 +49,6 @@ export function applyScrollLock(
   html.classList.add(SCROLL_LOCK_CLASS);
   body.classList.add(SCROLL_LOCK_CLASS);
   html.style.overflow = 'hidden';
-  body.style.overflow = 'hidden';
 
   const sbw = Number(opts.scrollbarWidth);
   if (Number.isFinite(sbw) && sbw > 0) {
@@ -72,7 +71,6 @@ export function restoreScrollLock(
   const body = doc.body;
 
   html.style.overflow = snap.htmlOverflow;
-  body.style.overflow = snap.bodyOverflow;
   body.style.paddingRight = snap.bodyPaddingRight;
 
   if (!snap.htmlHadClass) html.classList.remove(SCROLL_LOCK_CLASS);

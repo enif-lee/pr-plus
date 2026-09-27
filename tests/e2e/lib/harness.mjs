@@ -651,7 +651,7 @@ export function closeOverlay() {
   }
   const still2 = evalInPage(`!!document.querySelector('.prp-overlay')`);
   if (still2) {
-    evalInPage(`document.querySelector('.prp-overlay')?.remove(); document.body.style.overflow=''; true`);
+    evalInPage(`document.querySelector('.prp-overlay')?.remove(); document.documentElement.style.overflow=''; document.documentElement.classList.remove('prp-scroll-lock'); document.body.classList.remove('prp-scroll-lock'); true`);
   }
 }
 

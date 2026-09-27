@@ -4843,6 +4843,7 @@ export function PrModalApp({
   // @ts-expect-error modal dynamic action/picker shapes
           confirmLabel={picker?.confirmLabel || 'Apply'}
           anchorRef={pickerAnchorRef}
+          anchorKey={picker?.type || null}
           placement="bottom"
           placeholder={
             picker?.placeholder ||

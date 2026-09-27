@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  CDP,
   ROOT,
   ab,
   clearPrPlusIdb,
@@ -32,6 +33,8 @@ function slog(msg) {
 }
 
 function clearProfileSingletonLocks() {
+  // A CDP-attached Chrome is live on this profile; its locks are real.
+  if (CDP) return;
   try {
     const dir = path.join(ROOT, '.browser/profile');
     for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
@@ -88,7 +91,7 @@ function dismissOverlayIfAny() {
       sleepSync(80);
     }
     evalInPage(
-      `document.querySelector('.prp-overlay')?.remove(); document.body.style.overflow=''; true`
+      `document.querySelector('.prp-overlay')?.remove(); document.documentElement.style.overflow=''; document.documentElement.classList.remove('prp-scroll-lock'); document.body.classList.remove('prp-scroll-lock'); true`
     );
   } catch {
     /* page may not be ready */

@@ -362,7 +362,7 @@ export function FinishReviewModal({
 
   const layer = (
     <div
-      className={`prp-finish-review-layer${themeCls}`}
+      className={`prp-portal prp-finish-review-layer${themeCls}`}
       role="presentation"
       data-prp-finish-review="1"
       data-prp-color-mode={mode}

@@ -72,8 +72,9 @@ export function FullscreenViewer({
   }, []);
 
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // Lock on <html>, not body: body overflow breaks host-page sticky layout.
+    const prev = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
     // Root marker for the Opt-hint / Opt-chord gates (isFullscreenViewerOpen):
     // hints and modal Opt shortcuts must never paint over the stage.
     document.documentElement.setAttribute(FULLSCREEN_VIEWER_OPEN_ATTR, '1');
@@ -83,7 +84,7 @@ export function FullscreenViewer({
       /* ignore */
     }
     return () => {
-      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = prev;
       // Nested viewers: keep the marker until the last one unmounts. The
       // escape-stack cleanup above already ran for this viewer.
       if (escapeOverlayCount() === 0) {
@@ -107,7 +108,7 @@ export function FullscreenViewer({
 
   const node = (
     <div
-      className={`prp-overlay-viewer prp-overlay-viewer--${layer}`}
+      className={`prp-portal prp-overlay-viewer prp-overlay-viewer--${layer}`}
       role="dialog"
       aria-modal="true"
       aria-label={label}

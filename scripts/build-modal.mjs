@@ -3,7 +3,7 @@
  *
  * - Entry: src/modal/main.tsx
  * - CSS: collected from TSX/TS `import './x.css'` in the esbuild graph,
- *   then PostCSS (import + Tailwind + autoprefixer) → dist/pr-modal.css
+ *   then PostCSS (import + Tailwind + autoprefixer + prp scope guard) → dist/pr-modal.css
  * - Mermaid / hljs language packs: separate ESM chunks
  */
 import * as esbuild from 'esbuild';
@@ -14,6 +14,7 @@ import postcss from 'postcss';
 import postcssImport from 'postcss-import';
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
+import scopePrpCss from './scope-prp-css.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outDir = path.join(root, 'src', 'modal', 'dist');
@@ -136,6 +137,7 @@ await esbuild.build({
       postcssImport(),
       tailwindcss({ config: path.join(root, 'tailwind.config.js') }),
       autoprefixer(),
+      scopePrpCss(),
     ]).process(fs.readFileSync(syntheticPath, 'utf8'), {
       from: syntheticPath,
       to: cssOut,

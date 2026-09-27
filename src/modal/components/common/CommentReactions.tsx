@@ -382,7 +382,7 @@ export function CommentReactions({
           <div
             ref={pickerRef}
             id={pickerId}
-            className="prp-reactions__picker prp-reactions__picker--portal"
+            className="prp-portal prp-reactions__picker prp-reactions__picker--portal"
             data-prp-reaction-picker="1"
             data-placement={pickerPos.placement}
             data-prp-picker-place="explicit"
