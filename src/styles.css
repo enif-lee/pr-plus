@@ -399,11 +399,13 @@ html.prp-embed-active [data-prp-native-hidden='1'] {
 }
 /*
  * Body-level GH residual only — never hide pr+ portals on body
- * (ConfirmDialog, ShortcutHint, reaction picker, viewers).
+ * (ConfirmDialog, ShortcutHint, reaction picker, viewers), nor bare <svg>:
+ * Mermaid measures sequence-diagram text in a transient body > svg, and
+ * getBBox() on a display:none svg is 0×0 ("svg element not in render tree").
  */
 html.prp-embed-active
   body
-  > *:not(#prp-page-embed):not(#prp-modal-host):not(script):not(style):not(link):not(template):not(meta):not(noscript):not([class*='prp-']):not([id*='prp']):not([data-prp-confirm]):not([data-prp-reaction-picker]) {
+  > *:not(#prp-page-embed):not(#prp-modal-host):not(script):not(style):not(link):not(template):not(meta):not(noscript):not(svg):not([class*='prp-']):not([id*='prp']):not([data-prp-confirm]):not([data-prp-reaction-picker]) {
   display: none !important;
   content-visibility: hidden !important;
   contain: size layout style paint !important;
