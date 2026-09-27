@@ -16,7 +16,9 @@
   ],
   "host_permissions": [
     "https://github.com/*",
-    "https://api.github.com/*"
+    "https://api.github.com/*",
+    "https://linear.app/*",
+    "https://*.linear.app/*"
   ],
   "optional_host_permissions": [
     "https://*/*",
