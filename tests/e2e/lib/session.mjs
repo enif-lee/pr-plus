@@ -91,7 +91,7 @@ function dismissOverlayIfAny() {
       sleepSync(80);
     }
     evalInPage(
-      `document.querySelector('.prp-overlay')?.remove(); document.body.style.overflow=''; true`
+      `document.querySelector('.prp-overlay')?.remove(); document.documentElement.style.overflow=''; document.documentElement.classList.remove('prp-scroll-lock'); document.body.classList.remove('prp-scroll-lock'); true`
     );
   } catch {
     /* page may not be ready */
