@@ -30,6 +30,12 @@ export const MSG = {
   OPEN_PR: 'PR_TREE_OPEN_PR',
   CLOSE_PR: 'PR_TREE_CLOSE_PR',
   PR_STATUS: 'PR_TREE_PR_STATUS',
+  /** SW → shell tab (addressed by tabId): open / close. */
+  SHELL_CMD: 'PR_TREE_SHELL_CMD',
+  /** Partner iframe shell → SW: may this embedder show pr+? */
+  FRAME_ALLOWED: 'PR_TREE_FRAME_ALLOWED',
+  /** Shell tab → SW: was this URL's launch token minted by the SW? */
+  SHELL_LAUNCH_CHECK: 'PR_TREE_SHELL_LAUNCH_CHECK',
   CONNECTED_SITES_LIST: 'PR_TREE_CONNECTED_SITES_LIST',
   CONNECTED_SITES_ADD: 'PR_TREE_CONNECTED_SITES_ADD',
   CONNECTED_SITES_REMOVE: 'PR_TREE_CONNECTED_SITES_REMOVE',

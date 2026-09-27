@@ -61,6 +61,8 @@ describe('shouldKeepEmbedBodyChild', () => {
 
   test('keeps script/style/link tags', () => {
     expect(shouldKeepEmbedBodyChild(makeEl({ tagName: 'SCRIPT' }))).toBe(true);
+    // Mermaid measures sequence-diagram text in a transient body > svg.
+    expect(shouldKeepEmbedBodyChild(makeEl({ tagName: 'svg' }))).toBe(true);
     expect(shouldKeepEmbedBodyChild(makeEl({ tagName: 'STYLE' }))).toBe(true);
     expect(shouldKeepEmbedBodyChild(makeEl({ tagName: 'LINK' }))).toBe(true);
   });

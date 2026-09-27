@@ -163,7 +163,7 @@ For Chrome Web Store privacy practices:
 
 - **Single purpose:** GitHub pull request review — list stack-tree plus Conversation, Diff, and merge processing.  
 - **Remote code:** Not used; all extension code is packaged locally.  
-- **Host permissions:** `github.com` for UI enhancement; `api.github.com` for PR conversation, diff, and merge APIs. Optional HTTPS hosts for GitHub Enterprise and user-granted Connected sites (Linear overlay / Jira launcher). Localhost optional for local agents. Not a Linear/Jira data partnership.
+- **Host permissions:** `github.com` for UI enhancement; `api.github.com` for PR conversation, diff, and merge APIs. Optional HTTPS hosts for GitHub Enterprise and user-granted Connected sites (Linear overlay / Jira launcher). Localhost optional for local agents: loopback pages can reach pr+ only after the user adds Localhost under Connected sites. Not a Linear/Jira data partnership.
 - **storage permission:** Optional local PAT storage for private-repo API access.  
 
 ---

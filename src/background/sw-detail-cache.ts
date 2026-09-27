@@ -24,23 +24,35 @@ export function setExtensionDetailIdbForTests(next: DetailIdb | null) {
   idb = next;
 }
 
+/**
+ * One IDB serves every page host; PR keys (`owner/repo#n`) are host-less, so
+ * non-dotcom rows are prefixed with the resolved GitHub host (bindGithubWebHost).
+ * github.com keeps bare keys so existing rows stay valid.
+ */
+export function hostScopedDetailKey(message: SwMessage): string {
+  const key = String(message.key || '');
+  if (!key) return '';
+  const host = String(message.githubWebHost || 'github.com').toLowerCase();
+  return host === 'github.com' ? key : `${host}|${key}`;
+}
+
 export async function handleDetailCacheMessage(
   message: SwMessage
 ): Promise<unknown> {
   switch (message.type) {
     case MSG.DETAIL_CACHE_GET: {
-      const key = String(message.key || '');
+      const key = hostScopedDetailKey(message);
       const row = key ? await getExtensionDetailIdb().get(key) : null;
       return { ok: true, row };
     }
     case MSG.DETAIL_CACHE_SET: {
-      const key = String(message.key || '');
+      const key = hostScopedDetailKey(message);
       if (!key) return { ok: false, error: 'key required' };
       await getExtensionDetailIdb().set(key, message.value);
       return { ok: true };
     }
     case MSG.DETAIL_CACHE_DELETE: {
-      const key = String(message.key || '');
+      const key = hostScopedDetailKey(message);
       if (key) await getExtensionDetailIdb().delete(key);
       return { ok: true };
     }

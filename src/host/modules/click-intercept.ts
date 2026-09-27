@@ -211,6 +211,10 @@
   }
 
   function listenClearDetailCache() {
+    // Extension pages (shell tab / partner iframe) also receive every
+    // runtime.sendMessage; answering here would steal replies meant for the
+    // SW (open / status / close / clear-cache). The shell has its own channel.
+    if (HOST_RUNTIME === 'shell') return;
     try {
       chrome.runtime?.onMessage?.addListener((message: any, _sender: any, sendResponse: any) => {
         if (message?.type === 'PR_TREE_OPEN_PR') {

@@ -33,32 +33,6 @@ declare var __PRP_VERSION__: string;
     }
   }
 
-  function localOpenModal(args: any): boolean {
-    const host = global.PRModalHost;
-    if (!host || typeof host.openModal !== 'function') return false;
-    if (typeof host.isEnabled === 'function' && !host.isEnabled()) return false;
-    try {
-      void host.openModal({
-        owner: args.owner,
-        repo: args.repo,
-        number: args.number,
-        page: args.page,
-        position: args.position,
-        presentation: 'modal',
-        commitSha: args.commitSha,
-        commitEndSha: args.commitEndSha,
-        filePath: args.filePath,
-        fileKey: args.fileKey,
-        startLine: args.startLine,
-        endLine: args.endLine,
-        side: args.side,
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   function rpc(payload: Record<string, unknown>) {
     if (!global.chrome?.runtime?.sendMessage) {
       return Promise.resolve({ ok: false, error: 'chrome.runtime unavailable' });
@@ -106,9 +80,8 @@ declare var __PRP_VERSION__: string;
         githubWebHost,
         target: openArgs.target || 'auto',
       };
-      if (localOpenModal(openArgs)) {
-        return rpc({ ...payload, source: 'local-host' });
-      }
+      // Always via the SW (rate limit + registry); on a connected site it
+      // opens this tab's partner iframe (opener-embed).
       return rpc(payload);
     }
     return { ok: false, error: 'unknown-op' };

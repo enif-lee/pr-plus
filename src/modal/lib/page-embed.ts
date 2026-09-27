@@ -108,6 +108,9 @@ export const PAGE_EMBED_BODY_KEEP_TAGS: readonly string[] = [
   'TEMPLATE',
   'META',
   'NOSCRIPT',
+  // Mermaid measures sequence-diagram text in a transient `body > svg`;
+  // hiding it makes getBBox() 0×0 and the render throws.
+  'SVG',
 ];
 
 /**

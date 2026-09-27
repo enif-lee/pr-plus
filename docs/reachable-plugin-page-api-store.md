@@ -93,7 +93,7 @@ PR 상세 영속 계층은 **페이지 origin IDB가 아니라 확장 서비스 
 | K5 | `PRPlus` = MAIN 심 + isolated `postMessage`. MAIN에 `chrome.runtime` 없음. | 토큰 격리. |
 | K6 | Allowlist default-deny. 팝업 칩은 Linear/Jira **이름+로고**. 자동 허가 없음. | 사용자 결정. CWS 브랜드 리스크 수용. |
 | K7 | github.com에도 `PRPlus`. `[0]`은 기존 풀 스택. `[1]`/`[2]`는 start isolated/MAIN. | injection 테스트가 `[0]` ≡ `CONTENT_SCRIPT_JS`. |
-| K8 | 공개 API는 open/close/status/ping/version만. | XSS가 열 수는 있어도 머지/리뷰는 못 함. |
+| K8 | 공개 API는 open/close/status/ping/version만. 시트는 확장 origin iframe(`shell.html`)에 렌더링. | 페이지 JS·XSS는 PR을 열 수만 있고, iframe 안 PR 내용을 읽거나 머지/리뷰 버튼을 누를 수 없음. |
 | K9 | `auto` = 파트너 호스트 있으면 opener-embed. 없으면 GH 탭. 없으면 GH URL + `OPEN_PR` 재시도. 그다음 셸. | Linear가 1차 표면. `autoOpenEmbed`에 의존하지 않음. |
 | K10 | **`selectTokenForWebHost`는 불변.** 입력만 확장 소유. | 금고 규칙은 이미 맞다. |
 | K11 | **캐시 마이그레이션 없음.** GH 탭은 페이지 IDB 유지. Linear/셸은 peek miss → 네트워크. | IDB는 첫 페인트 가속. 오픈 필수 아님. Linear는 GH IDB를 원래 못 읽음. |
@@ -111,9 +111,9 @@ PR 상세 영속 계층은 **페이지 origin IDB가 아니라 확장 서비스 
 | K23 | Connected sites = Linear/Jira 이름+로고. | 사용자 결정. |
 | K24 | `manifest.key` 없음. | 사용자 결정. |
 | K25 | 셸 = `tabs.create(shell.html)` 일반 탭. | 사용자 결정. |
-| K26 | Linear에만 `PARTNER_HOST_JS`. Jira·localhost는 심만. | 풀 스택은 GH DOM에 묶임. |
-| K27 | `runtime: 'partner'` = overlay only. GH hide/URI/리스트/embed watch 스킵. | Linear 크롬 보존. |
-| K28 | 같은 Linear 탭은 심→`openModal` 직접. SW는 레지스트리만. | |
+| K26 | 모든 Connected site에 얇은 `PARTNER_HOST_JS`(링크 감지 + iframe 소유). 모달 번들은 페이지에 주입하지 않음. | light DOM 모달은 페이지 스크립트에 노출됨. |
+| K27 | `runtime: 'partner'` = 얇은 partner 스크립트만(링크 감지·Linear 토글·iframe 소유). 모달 host는 iframe 안 shell에서만 동작. | Linear 크롬 보존, 페이지에 pr+ DOM 없음. |
+| K28 | `PRPlus.open`은 항상 SW 경유(레이트 리밋·레지스트리) → SW가 같은 탭 partner에 open 지시 → iframe. 링크 클릭은 partner가 직접 iframe을 열고 SW에는 레지스트리만. | 페이지가 SW 한도를 우회해 토큰을 소진하지 못함. |
 | K29 | PAT **쓰기**는 계속 팝업(+ GH 온보딩→SW). 페이지에 비밀을 두지 않는다. | 이미 확장 소유. 온보딩은 UX 복제일 뿐 저장소가 아님. |
 
 ---
@@ -457,7 +457,7 @@ IDB 스키마 변경 없음. 페이지 DB 삭제/import 없음.
 - PRIVACY: Connected sites = 런처/오버레이, 제휴 아님. Linear에 UI를 그린다고 명시.
 - CWS: localhost `externally_connectable`, Linear 브랜드 칩 수용. `unlimitedStorage` **신청하지 않음**.
 
-위협: XSS가 아는 PR을 열 수 있음(allowlist+no mutation). `status`/`close`는 callerOrigin 스코프. `githubHost` 위조 → 미등록이면 token null.
+위협: XSS가 아는 PR을 열 수 있음(allowlist+no mutation). 시트는 확장 origin iframe이라 페이지가 DOM을 읽거나 클릭을 합성할 수 없고, `shell.html`은 SW가 임베더를 Connected site로 확인(`PR_TREE_FRAME_ALLOWED`)해야만 렌더링. 남는 위험: 연결된 사이트가 iframe 요소를 투명하게 만드는 클릭재킹. loopback 외부 메시지는 Localhost를 Connected sites에 등록한 뒤에만 허용. `status`/`close`는 callerOrigin 스코프. `githubHost` 위조 → 미등록이면 token null.
 
 ---
 

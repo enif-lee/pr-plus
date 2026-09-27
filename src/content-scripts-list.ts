@@ -69,17 +69,20 @@ const PARTNER_HOST_SHARED = [
   'src/pr-modal-host.js',
 ] as const;
 
-/** Partner overlay — no list/onboarding/content.ts. */
+/**
+ * Partner (Connected site) boot — no modal/host in the page: the sheet renders
+ * in an extension-origin iframe (shell.html), out of reach of page scripts.
+ */
 export const PARTNER_HOST_JS = [
   'src/partner/mark-runtime.js',
-  ...PARTNER_HOST_SHARED,
+  'src/github-endpoints.js',
+  'src/modal/pure/locale-resolve.js',
+  'src/modal/pure/i18n.js',
   'src/partner/partner.js',
 ] as const;
 
-export const PARTNER_HOST_CSS = [
-  'src/styles.css',
-  'src/modal/dist/pr-modal.css',
-] as const;
+/** Only the pr+ toggle styles; the sheet's CSS loads inside the iframe. */
+export const PARTNER_HOST_CSS = ['src/styles.css'] as const;
 
 /** Extension-origin shell tab. */
 export const SHELL_SCRIPT_JS = [
@@ -87,4 +90,4 @@ export const SHELL_SCRIPT_JS = [
   'src/shell/shell.js',
 ] as const;
 
-export const SHELL_SCRIPT_CSS = PARTNER_HOST_CSS;
+export const SHELL_SCRIPT_CSS = ['src/styles.css', 'src/modal/dist/pr-modal.css'] as const;

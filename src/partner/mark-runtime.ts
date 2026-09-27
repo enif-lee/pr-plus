@@ -5,6 +5,8 @@
 (function markPartnerRuntime(global: any) {
   try {
     global.__PRP_PARTNER_RUNTIME = true;
+    // Public runtime hint for integrators (docs/prplus-integration.md §4).
+    global.document?.documentElement?.setAttribute('data-prp-runtime', 'partner');
   } catch {
     /* ignore */
   }

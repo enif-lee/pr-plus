@@ -425,9 +425,12 @@
     if (!chromeApi?.runtime?.sendMessage) {
       return Promise.resolve({ ok: false, error: 'no-runtime' });
     }
+    // Same page host the bridge stamps on fetches, so the SW keys the cache by
+    // the GitHub host the data came from (github.com vs GHES never collide).
+    const webHost = String((globalThis as any).location?.hostname || '');
     return new Promise((resolve) => {
       try {
-        chromeApi.runtime.sendMessage(message, (res: any) => {
+        chromeApi.runtime.sendMessage({ ...message, webHost }, (res: any) => {
           const err = chromeApi.runtime.lastError;
           if (err) resolve({ ok: false, error: err.message });
           else resolve(res || { ok: false });

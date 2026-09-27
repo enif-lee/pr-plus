@@ -400,7 +400,9 @@
             tag === 'LINK' ||
             tag === 'TEMPLATE' ||
             tag === 'META' ||
-            tag === 'NOSCRIPT'
+            tag === 'NOSCRIPT' ||
+            // Mermaid's transient text-measure svg (see styles.css)
+            tag === 'SVG'
           ) {
             continue;
           }
