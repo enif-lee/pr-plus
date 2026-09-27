@@ -308,7 +308,7 @@ export function ShortcutHint({
         ? createPortal(
             <kbd
               ref={tipRef}
-              className={`prp-opt-btn-hint prp-opt-btn-hint--fixed prp-opt-btn-hint--${placement} ${className}`.trim()}
+              className={`prp-portal prp-opt-btn-hint prp-opt-btn-hint--fixed prp-opt-btn-hint--${placement} ${className}`.trim()}
               style={{ top: coords.top, left: coords.left }}
               data-placement={placement}
               aria-hidden="true"

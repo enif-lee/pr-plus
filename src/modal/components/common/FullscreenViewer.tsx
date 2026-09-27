@@ -108,7 +108,7 @@ export function FullscreenViewer({
 
   const node = (
     <div
-      className={`prp-overlay-viewer prp-overlay-viewer--${layer}`}
+      className={`prp-portal prp-overlay-viewer prp-overlay-viewer--${layer}`}
       role="dialog"
       aria-modal="true"
       aria-label={label}

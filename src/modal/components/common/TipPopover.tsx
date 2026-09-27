@@ -165,7 +165,7 @@ export function TipPopover({
   const tipNode = (
     <span
       ref={tipRef}
-      className={`prp-tip-pop prp-tip-pop--portal prp-tip-pop--${placement}${
+      className={`prp-portal prp-tip-pop prp-tip-pop--portal prp-tip-pop--${placement}${
         open ? ' prp-tip-pop--visible' : ''
       }`}
       data-placement={placement}

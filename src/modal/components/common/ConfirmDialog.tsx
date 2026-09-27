@@ -75,7 +75,7 @@ export function ConfirmDialog({
 
   const layer = (
     <div
-      className={`prp-confirm-layer prp-confirm-layer--enter${themeCls}${toneCls}`}
+      className={`prp-portal prp-confirm-layer prp-confirm-layer--enter${themeCls}${toneCls}`}
       role="presentation"
       data-prp-confirm="1"
       /* Do NOT set data-color-mode — GH CSS `[data-color-mode]{background:canvas}`

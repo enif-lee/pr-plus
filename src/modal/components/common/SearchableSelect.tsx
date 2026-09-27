@@ -616,7 +616,7 @@ export function SearchableSelect({
   if (!pos && !anchorRef) {
     return createPortal(
       <div
-        className={`prp-sselect-layer${onBody ? ' prp-sselect-portal' : ''}`}
+        className={`prp-portal prp-sselect-layer${onBody ? ' prp-sselect-portal' : ''}`}
         role="presentation"
         data-prp-sselect-root="1"
       >
@@ -629,7 +629,7 @@ export function SearchableSelect({
 
   return createPortal(
     <div
-      className={onBody ? 'prp-sselect-portal' : undefined}
+      className={onBody ? 'prp-portal prp-sselect-portal' : 'prp-portal'}
       data-prp-sselect-root="1"
     >
       <div

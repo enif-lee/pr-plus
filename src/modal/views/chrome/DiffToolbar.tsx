@@ -656,7 +656,7 @@ export function DiffToolbar(props: any) {
                     const menu = (
                       <div
                         ref={settingsMenuRef}
-                        className="prp-diff-review-settings prp-diff-review-settings--portal"
+                        className="prp-portal prp-diff-review-settings prp-diff-review-settings--portal"
                         role="menu"
                         aria-label={t('diff_view_settings')}
                         data-prp-review-filter-menu="1"
