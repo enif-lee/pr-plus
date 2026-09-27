@@ -204,8 +204,13 @@ export async function syncPartnerContentScripts(origins?: string[]) {
       LINEAR_HOST_CS_ID,
       PARTNER_HOST_CS_ID,
     ];
+    // unregisterContentScripts rejects the whole call (and removes nothing)
+    // when any id is missing, so only pass the ids that are live.
     try {
-      await chrome.scripting.unregisterContentScripts({ ids });
+      const live = (await chrome.scripting.getRegisteredContentScripts({ ids })).map(
+        (s: any) => s.id
+      );
+      if (live.length) await chrome.scripting.unregisterContentScripts({ ids: live });
     } catch {
       /* not registered */
     }
