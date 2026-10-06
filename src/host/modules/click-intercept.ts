@@ -42,13 +42,17 @@
         if (/\/pull\/\d+/.test(href)) return false;
         if (/\/pulls(?:\/|$|\?)/.test(href)) return true;
       }
-      const btn = target.closest('button, summary');
-      if (btn) {
-        const aria = `${btn.getAttribute('aria-label') || ''} ${btn.textContent || ''}`;
-        if (/filter by|sort by|display density|preview options/i.test(aria)) {
-          return true;
-        }
+      // Native row controls: bulk-select checkbox (+ label hit area), action
+      // menus, buttons — GitHub owns these clicks, never a PR open.
+      if (
+        target.closest(
+          'input, select, textarea, label, details, [role="checkbox"], [role="switch"], [role="radio"], [role="menuitem"], [role="option"], [role="combobox"], [role="tab"]'
+        )
+      ) {
+        return true;
       }
+      const btn = target.closest('button, summary, [role="button"]');
+      if (btn) return true;
     } catch {
       /* ignore */
     }

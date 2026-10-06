@@ -176,6 +176,9 @@ describe('React pulls dashboard wiring (static)', () => {
     expect(click).toMatch(/listitem-title-link/);
     expect(click).toMatch(/isPullsListChromeClick/);
     expect(click).toMatch(/parsePrFromListRow/);
+    // Row checkbox / label / menu clicks are native chrome, never a PR open.
+    expect(click).toMatch(/input, select, textarea, label/);
+    expect(click).toMatch(/role="checkbox"/);
 
     const onboard = read('src/onboarding-core.ts');
     expect(onboard).toMatch(/listitem-title-link/);
