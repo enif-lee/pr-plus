@@ -73,6 +73,8 @@ export function BodyEditor({
       className={`prp-body-editor${compact ? ' prp-body-editor--compact' : ''}`}
       data-prp-composer-root="1"
       data-prp-composer-kind="body"
+      data-prp-unsaved-draft={draft}
+      data-prp-unsaved-saved={value || ''}
     >
       <MarkdownComposer
         value={draft}

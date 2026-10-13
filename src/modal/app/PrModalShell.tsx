@@ -32,6 +32,10 @@ import {
   buildMergeConfirmRequest,
   confirmGateProceed,
 } from '../lib/confirm-gate';
+import {
+  hasUnsavedModalInput,
+  snapshotUnsavedModalInput,
+} from '../lib/unsaved-input';
 import { canUpdateBranch, coerceMergeMethod } from '../lib/merge-box-status';
 import { useThreadCommentsAndGap } from '../hooks/useThreadCommentsAndGap';
 import { useContextThreadActions } from '../hooks/useContextThreadActions';
@@ -672,6 +676,39 @@ export function PrModalApp({
       return null;
     });
   }, []);
+  /** One leave prompt at a time (close and stack switch share it). */
+  const leaveCheckRef = useRef(false);
+  const shellMountedRef = useRef(true);
+  useEffect(() => {
+    shellMountedRef.current = true;
+    return () => {
+      shellMountedRef.current = false;
+    };
+  }, []);
+  const confirmLeaveIfDirty = useCallback(async () => {
+    const live = detailRef.current || detail;
+    const snap = snapshotUnsavedModalInput({
+      state: useModalStore.getState(),
+      detail: live,
+      doc: typeof document !== 'undefined' ? document : null,
+    });
+    if (!hasUnsavedModalInput(snap)) return true;
+    if (leaveCheckRef.current) return false;
+    leaveCheckRef.current = true;
+    try {
+      return confirmGateProceed(
+        await requestConfirm({
+          title: formatMessage('leave_unsaved_title', appLocale),
+          message: formatMessage('leave_unsaved_message', appLocale),
+          confirmLabel: formatMessage('leave_unsaved_confirm', appLocale),
+          cancelLabel: formatMessage('cta_cancel', appLocale),
+          tone: 'warn',
+        })
+      );
+    } finally {
+      leaveCheckRef.current = false;
+    }
+  }, [appLocale, detail, requestConfirm]);
   const commentPrefetchGenRef = useRef(0);
   /** Dedup GH commit-filter restore from inbound /changes/{sha}|{a}..{b}. */
   const ghCommitRouteAppliedRef = useRef<string | null>(null);
@@ -2234,37 +2271,44 @@ export function PrModalApp({
     // Embed has no exit chrome — ignore close (Escape stays no-op for shell).
     if (isEmbed) return;
     if (closingRef.current || !open) return;
-    closingRef.current = true;
-    setClosing(true);
-    // Drop deep-link params as soon as close starts (don't wait for anim end)
-    try {
-      if (typeof history !== 'undefined' && typeof location !== 'undefined') {
-        clearLocationRoute(history, location);
+    void (async () => {
+      if (!(await confirmLeaveIfDirty())) return;
+      if (!shellMountedRef.current || closingRef.current || !open) return;
+      closingRef.current = true;
+      setClosing(true);
+      // Drop deep-link params as soon as close starts (don't wait for anim end)
+      try {
+        if (typeof history !== 'undefined' && typeof location !== 'undefined') {
+          clearLocationRoute(history, location);
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-    uriWasOpenRef.current = false;
-    // Docked sheet slides out; fullscreen Diff / modal scale-fades out.
-    // Exit is 180ms CSS ease-out (mirrors the enter) — close must feel as fast
-    // as open; small buffer so the final frame paints before host unmount.
-    const sheetSlide =
-      shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
-    const duration = 190;
-    setAnimClass(
-      sheetSlide
-        ? 'prp-modal--sheet-out'
-        : 'prp-modal--animating prp-modal--anim-out'
-    );
-    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = setTimeout(() => {
-      closeTimerRef.current = null;
-      closingRef.current = false;
-      setClosing(false);
-      setAnimClass('');
-      onClose?.();
-    }, duration);
-  }, [open, onClose, shellMode, layoutMode, setAnimClass, isEmbed]);
+      uriWasOpenRef.current = false;
+      // Docked sheet slides out; fullscreen Diff / modal scale-fades out.
+      // Exit is 180ms CSS ease-out (mirrors the enter) — close must feel as fast
+      // as open; small buffer so the final frame paints before host unmount.
+      const sheetSlide =
+        shellMode === SHELL_SHEET && layoutMode !== LAYOUT_DIFF;
+      const duration = 190;
+      setAnimClass(
+        sheetSlide
+          ? 'prp-modal--sheet-out'
+          : 'prp-modal--animating prp-modal--anim-out'
+      );
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
+        // Keep `closing` and the exit class until the host unmounts.
+        // Clearing them drops animation-fill-mode: forwards, so the shell
+        // snaps back to opacity 1 for a frame. Host tear-down is deferred
+        // (rAF → setTimeout) and would paint that frame before unmount.
+        // closingRef stays true so a still-pending enter timer cannot strip
+        // the exit class (that timer only clears the class when not closing).
+        onClose?.();
+      }, duration);
+    })();
+  }, [open, onClose, shellMode, layoutMode, setAnimClass, isEmbed, confirmLeaveIfDirty]);
 
   /**
    * After Close PR (open→closed, not merged), auto-close the shell so the user
@@ -3075,14 +3119,23 @@ export function PrModalApp({
     (n: number) => {
       const num = Number(n);
       if (!Number.isFinite(num) || num <= 0) return;
-      // Reset path selections so the opened PR becomes the focused stack current
-      setStackPathSelections({});
-      const page = layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
-      if (typeof onOpenStackPr === 'function') {
-        onOpenStackPr(num, { page });
+      const go = () => {
+        // Reset path selections so the opened PR becomes the focused stack current
+        setStackPathSelections({});
+        const page = layoutMode === LAYOUT_DIFF ? 'diff' : 'conversation';
+        if (typeof onOpenStackPr === 'function') {
+          onOpenStackPr(num, { page });
+        }
+      };
+      if (Number(detail?.number) === num) {
+        go();
+        return;
       }
+      void confirmLeaveIfDirty().then((ok) => {
+        if (ok && shellMountedRef.current) go();
+      });
     },
-    [layoutMode, onOpenStackPr]
+    [layoutMode, onOpenStackPr, detail?.number, confirmLeaveIfDirty]
   );
 
   const navigateAdjacentPr = useCallback(

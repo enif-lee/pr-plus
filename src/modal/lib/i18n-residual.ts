@@ -195,6 +195,9 @@ export const RESIDUAL_MESSAGE_KEYS = [
   'md_preview_loading',
   'md_preview_error',
   'md_preview_too_large',
+  'leave_unsaved_title',
+  'leave_unsaved_message',
+  'leave_unsaved_confirm',
 ] as const;
 
 export const residualEn: MessageCatalog = {
@@ -396,6 +399,10 @@ export const residualEn: MessageCatalog = {
   md_preview_loading: 'Loading markdown…',
   md_preview_error: 'Could not load markdown file',
   md_preview_too_large: 'File is too large to preview as markdown',
+  leave_unsaved_title: 'Leave without sending?',
+  leave_unsaved_message:
+    'You have unsent text in this pull request. Leave anyway?',
+  leave_unsaved_confirm: 'Leave',
 };
 
 export const residualKo: MessageCatalog = {
@@ -595,6 +602,10 @@ export const residualKo: MessageCatalog = {
   md_preview_loading: '마크다운 불러오는 중…',
   md_preview_error: '마크다운 파일을 불러오지 못했습니다',
   md_preview_too_large: '파일이 너무 커서 마크다운으로 미리볼 수 없습니다',
+  leave_unsaved_title: '보내지 않고 나갈까요?',
+  leave_unsaved_message:
+    '이 풀 리퀘스트에 아직 보내지 않은 입력이 있습니다. 그래도 나갈까요?',
+  leave_unsaved_confirm: '나가기',
 };
 
 export const residualJa: MessageCatalog = {
@@ -795,6 +806,10 @@ export const residualJa: MessageCatalog = {
   md_preview_loading: 'Markdown を読み込み中…',
   md_preview_error: 'Markdown ファイルを読み込めませんでした',
   md_preview_too_large: 'ファイルが大きすぎて Markdown プレビューできません',
+  leave_unsaved_title: '送信せずに離れますか？',
+  leave_unsaved_message:
+    'このプルリクエストに未送信の入力があります。離れますか？',
+  leave_unsaved_confirm: '離れる',
 };
 
 export const residualZh: MessageCatalog = {
@@ -988,4 +1003,7 @@ export const residualZh: MessageCatalog = {
   md_preview_loading: '正在加载 Markdown…',
   md_preview_error: '无法加载 Markdown 文件',
   md_preview_too_large: '文件过大，无法预览 Markdown',
+  leave_unsaved_title: '不发送并离开？',
+  leave_unsaved_message: '此拉取请求中有尚未发送的内容。仍要离开吗？',
+  leave_unsaved_confirm: '离开',
 };

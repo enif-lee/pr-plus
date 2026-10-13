@@ -365,6 +365,8 @@ export function FinishReviewModal({
       className={`prp-portal prp-finish-review-layer${themeCls}`}
       role="presentation"
       data-prp-finish-review="1"
+      data-prp-unsaved-draft={body}
+      data-prp-unsaved-saved=""
       data-prp-color-mode={mode}
     >
       <div

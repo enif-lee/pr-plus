@@ -622,5 +622,14 @@ describe('architecture gates', () => {
     );
     expect(closeWait).toBeGreaterThanOrEqual(outMs);
     expect(closeWait).toBeGreaterThanOrEqual(sheetOutMs);
+    // Exit class must still be on the node when onClose runs. Removing it
+    // (or `closing`) restores the resting opacity before the deferred unmount.
+    const closeTimer = (
+      closeBody.match(/setTimeout\(\(\) => \{[\s\S]*?\}, duration\);/) || ['']
+    )[0];
+    expect(closeTimer).toMatch(/onClose\?\.\(\)/);
+    expect(closeTimer).not.toMatch(/setAnimClass\(''\)/);
+    expect(closeTimer).not.toMatch(/setClosing\(false\)/);
+    expect(closeTimer).not.toMatch(/closingRef\.current = false/);
   });
 });
