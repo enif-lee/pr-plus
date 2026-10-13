@@ -293,8 +293,44 @@ function findSecondColumnHost(row: any) {
 
 /**
  * Native second meta line: "#123 opened … by … · Review required"
- * (kept hidden so deferred review decisions can still load)
+ * (kept hidden so deferred review decisions can still load).
+ *
+ * 2026-10 refreshed pulls list dropped `Description-module__*` for a hashed
+ * `description__*` container. The title cell no longer wraps that line.
  */
+function findReactDescription(row: any) {
+  const legacy =
+    row.querySelector('[class*="PullsListItem-module__description"]') ||
+    row.querySelector('[class*="Description-module__container"]') ||
+    row
+      .querySelector('[data-testid="timestamp-container"]')
+      ?.closest('[class*="Description-module"]');
+  if (legacy) return legacy;
+
+  const hashed = [...row.querySelectorAll('[class*="description__"]')].find(
+    (el: any) =>
+      !el.classList.contains(PR_TREE_META_CLASS) &&
+      (el.querySelector('[data-testid="timestamp-container"], relative-time') ||
+        /#\d+/.test(el.textContent || ''))
+  );
+  if (hashed) return hashed;
+
+  const stamp = row.querySelector('[data-testid="timestamp-container"]');
+  let el = stamp?.parentElement;
+  while (el && el !== row) {
+    if (
+      /#\d+/.test(el.textContent || '') &&
+      el.querySelector(
+        '[data-testid="author-filter-link"], .opened-by, relative-time'
+      )
+    ) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
 function findNativeSecondRow(row: any) {
   if (!row) return null;
 
@@ -310,12 +346,7 @@ function findNativeSecondRow(row: any) {
     );
   }
 
-  const reactDesc =
-    row.querySelector('[class*="PullsListItem-module__description"]') ||
-    row.querySelector('[class*="Description-module__container"]') ||
-    row
-      .querySelector('[data-testid="timestamp-container"]')
-      ?.closest('[class*="Description-module"]');
+  const reactDesc = findReactDescription(row);
   if (reactDesc) return reactDesc;
 
   const col = findSecondColumnHost(row);
@@ -435,6 +466,26 @@ function buildOpenedMeta(doc: any, pr: any, bits: any) {
   return wrap;
 }
 
+function hideNativeSecond(nativeSecond: any) {
+  if (!nativeSecond || nativeSecond.classList.contains(PR_TREE_META_CLASS)) return;
+  nativeSecond.classList.add(PR_TREE_NATIVE_META_CLASS);
+  nativeSecond.setAttribute('hidden', '');
+  nativeSecond.setAttribute('aria-hidden', 'true');
+}
+
+/** Re-hide a description GitHub replaced after the first paint. No-op when already hidden. */
+function rehideNativeDescriptions(doc: any) {
+  let hidden = 0;
+  for (const row of findOriginalPrRows(doc)) {
+    if (row.querySelector(`.${PR_TREE_NATIVE_META_CLASS}`)) continue;
+    const nativeSecond = findNativeSecondRow(row);
+    if (!nativeSecond) continue;
+    hideNativeSecond(nativeSecond);
+    hidden += 1;
+  }
+  return hidden;
+}
+
 function resolveReviewState(row: any, nativeSecond: any, meta: any) {
   const fromMeta = meta?.dataset?.[PR_TREE_REVIEW_STATE];
   if (fromMeta) return fromMeta;
@@ -493,11 +544,7 @@ function applyRowMeta(doc: any, row: any, pr: any) {
   host.classList.add(PR_TREE_META_HOST_CLASS);
 
   let nativeSecond = findNativeSecondRow(row);
-  if (nativeSecond && !nativeSecond.classList.contains(PR_TREE_META_CLASS)) {
-    nativeSecond.classList.add(PR_TREE_NATIVE_META_CLASS);
-    nativeSecond.setAttribute('hidden', '');
-    nativeSecond.setAttribute('aria-hidden', 'true');
-  }
+  hideNativeSecond(nativeSecond);
 
   let meta = host.querySelector(`:scope > .${PR_TREE_META_CLASS}`);
   if (!meta) {
@@ -533,8 +580,14 @@ function refreshReviewBadges(doc: any, prs: any) {
     if (!pr) continue;
 
     const meta = row.querySelector(`.${PR_TREE_META_CLASS}`);
-    const nativeSecond = row.querySelector(`.${PR_TREE_NATIVE_META_CLASS}`);
     if (!meta) continue;
+
+    // React replaces the description node when deferred review/checks land.
+    let nativeSecond = row.querySelector(`.${PR_TREE_NATIVE_META_CLASS}`);
+    if (!nativeSecond) {
+      nativeSecond = findNativeSecondRow(row);
+      hideNativeSecond(nativeSecond);
+    }
 
     const next =
       detectReviewState(nativeSecond?.textContent || '') ||
@@ -544,7 +597,9 @@ function refreshReviewBadges(doc: any, prs: any) {
     const hasAuthor = Boolean(meta.querySelector('.pr-tree-author'));
     const hasTime = Boolean(meta.querySelector('.pr-tree-relative-time, relative-time'));
     const nativeHasAuthor = Boolean(
-      nativeSecond?.querySelector?.('.opened-by a')
+      nativeSecond?.querySelector?.(
+        '.opened-by a, [data-testid="author-filter-link"]'
+      )
     );
     const nativeHasTime = Boolean(nativeSecond?.querySelector?.('relative-time'));
     const needsAuthorTime = (nativeHasAuthor && !hasAuthor) || (nativeHasTime && !hasTime);
@@ -1039,6 +1094,7 @@ const domApi = {
   applyListRowFromDetail,
   countMissingDecorations,
   refreshReviewBadges,
+  rehideNativeDescriptions,
   createToggleButton,
   mountToggleNearHeader,
 };

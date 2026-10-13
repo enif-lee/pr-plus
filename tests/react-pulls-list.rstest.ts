@@ -149,6 +149,139 @@ describe('React pulls dashboard list rows', () => {
     expect(title?.contains(meta)).toBe(false);
   });
 
+  test('applyRowMeta hides the 2026-10 hashed description line', () => {
+    const api = loadDomApi();
+    const html = `<!DOCTYPE html><html><body>
+      <ul role="list">
+        <li class="listItem__X41oTe">
+          <div data-listview-item-title-container="true">
+            <h3>
+              <a data-testid="listitem-title-link" href="/o/r/pull/1922">Proxy</a>
+            </h3>
+          </div>
+          <div class="container__VGL_Vt">
+            <div class="container__W45oI6 description__mZjLFE">
+              <span><span>#1922</span></span>
+              <span data-testid="timestamp-container">
+                <a data-testid="author-filter-link" href="/o/r/pulls?q=author:Sungyoun-Kim">Sungyoun-Kim</a>
+                <span> opened </span>
+                <relative-time>Aug 28</relative-time>
+              </span>
+              <span>Review required</span>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </body></html>`;
+    const doc = new JSDOM(html).window.document;
+    const row = api.findListRowByNumber(doc, 1922);
+    const ok = api.applyRowMeta(doc, row, {
+      number: 1922,
+      draft: false,
+      baseRef: 'master',
+      headRef: 'fix/pronaia-trusted-proxy',
+      author: 'Sungyoun-Kim',
+    });
+    expect(ok).toBe(true);
+    const native = row.querySelector('.description__mZjLFE');
+    expect(native?.classList.contains('pr-tree-native-meta')).toBe(true);
+    expect(native?.hasAttribute('hidden')).toBe(true);
+    const meta = row.querySelector('.pr-tree-row-meta');
+    expect(meta?.textContent).toContain('#1922');
+    expect(meta?.textContent).toContain('opened');
+    expect(meta?.textContent).toContain('Aug 28');
+    expect(meta?.textContent).toContain('Sungyoun-Kim');
+    expect(row.querySelectorAll('.pr-tree-row-meta').length).toBe(1);
+  });
+
+  test('refreshReviewBadges re-hides a replaced description node', () => {
+    const api = loadDomApi();
+    const html = `<!DOCTYPE html><html><body>
+      <ul role="list">
+        <li class="listItem__X41oTe">
+          <div data-listview-item-title-container="true">
+            <h3>
+              <a data-testid="listitem-title-link" href="/o/r/pull/1922">Proxy</a>
+            </h3>
+          </div>
+          <div class="container__VGL_Vt">
+            <div class="description__mZjLFE">
+              <span>#1922</span>
+              <span data-testid="timestamp-container">
+                <a data-testid="author-filter-link" href="/o/r/pulls?q=author:Sungyoun-Kim">Sungyoun-Kim</a>
+                <relative-time>Aug 28</relative-time>
+              </span>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </body></html>`;
+    const doc = new JSDOM(html).window.document;
+    const row = api.findListRowByNumber(doc, 1922);
+    const pr = { number: 1922, author: 'Sungyoun-Kim', baseRef: 'master', headRef: 'fix/x' };
+    expect(api.applyRowMeta(doc, row, pr)).toBe(true);
+    const slot = row.querySelector('.container__VGL_Vt');
+    slot.innerHTML = `<div class="description__mZjLFE"><span>#1922</span><span data-testid="timestamp-container"><a data-testid="author-filter-link">Sungyoun-Kim</a><relative-time>Aug 28</relative-time></span><span>Review required</span></div>`;
+    expect(row.querySelector('.pr-tree-native-meta')).toBeNull();
+    api.refreshReviewBadges(doc, [pr]);
+    const native = row.querySelector('.description__mZjLFE');
+    expect(native?.hasAttribute('hidden')).toBe(true);
+    expect(row.querySelector('.pr-tree-row-meta')?.textContent).toContain('Review required');
+  });
+
+  test('rehideNativeDescriptions hides a replaced node and does not rewrite when already hidden', () => {
+    const api = loadDomApi();
+    const html = `<!DOCTYPE html><html><body>
+      <ul role="list">
+        <li>
+          <div data-listview-item-title-container="true">
+            <h3><a data-testid="listitem-title-link" href="/o/r/pull/1922">Proxy</a></h3>
+          </div>
+          <div class="description__mZjLFE"><span>#1922</span><span data-testid="timestamp-container"><relative-time>Aug 28</relative-time></span></div>
+        </li>
+      </ul>
+    </body></html>`;
+    const doc = new JSDOM(html).window.document;
+    const row = api.findListRowByNumber(doc, 1922);
+    expect(api.applyRowMeta(doc, row, { number: 1922, author: 'Sungyoun-Kim' })).toBe(true);
+    row.querySelector('.description__mZjLFE')?.remove();
+    const fresh = doc.createElement('div');
+    fresh.className = 'description__mZjLFE';
+    fresh.innerHTML = '<span>#1922</span><span data-testid="timestamp-container"><relative-time>Sep 1</relative-time></span>';
+    row.appendChild(fresh);
+    expect(api.rehideNativeDescriptions(doc)).toBe(1);
+    expect(fresh.hasAttribute('hidden')).toBe(true);
+    expect(api.rehideNativeDescriptions(doc)).toBe(0);
+  });
+
+  test('applyRowMeta hides a description that no longer uses description__', () => {
+    const api = loadDomApi();
+    const html = `<!DOCTYPE html><html><body>
+      <ul role="list">
+        <li>
+          <div data-listview-item-title-container="true">
+            <h3>
+              <a data-testid="listitem-title-link" href="/o/r/pull/1838">Recorder</a>
+            </h3>
+          </div>
+          <div class="meta-slot">
+            <span><span>#1838</span></span>
+            <span data-testid="timestamp-container">
+              <a data-testid="author-filter-link" href="/o/r/pulls?q=author:rtzr-jelly">rtzr-jelly</a>
+              <relative-time>Apr 27</relative-time>
+            </span>
+          </div>
+        </li>
+      </ul>
+    </body></html>`;
+    const doc = new JSDOM(html).window.document;
+    const row = api.findListRowByNumber(doc, 1838);
+    expect(api.applyRowMeta(doc, row, { number: 1838, author: 'rtzr-jelly' })).toBe(true);
+    const native = row.querySelector('.meta-slot');
+    expect(native?.classList.contains('pr-tree-native-meta')).toBe(true);
+    expect(native?.hasAttribute('hidden')).toBe(true);
+  });
+
   test('mountToggleNearHeader uses header-title parent', () => {
     const api = loadDomApi();
     const doc = new JSDOM(reactPullsHtml()).window.document;
@@ -182,5 +315,8 @@ describe('React pulls dashboard wiring (static)', () => {
 
     const onboard = read('src/onboarding-core.ts');
     expect(onboard).toMatch(/listitem-title-link/);
+
+    const boot = read('src/content-bootstrap.ts');
+    expect(boot).toMatch(/rehideNativeDescriptions\(document\)/);
   });
 });

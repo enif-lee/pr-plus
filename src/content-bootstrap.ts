@@ -25,6 +25,7 @@ function createPrTreeApp(deps: any) {
     clearListDecorations,
     countMissingDecorations,
     refreshReviewBadges,
+    rehideNativeDescriptions,
     createToggleButton,
     mountToggleNearHeader,
     PR_TREE_TOGGLE_ID,
@@ -435,6 +436,13 @@ function createPrTreeApp(deps: any) {
     }
 
     ensureToggle();
+
+    // Description node can be replaced after the pr+ meta row already exists.
+    // countMissingDecorations stays 0 in that case, so hide again here.
+    const rehidden = rehideNativeDescriptions(document);
+    if (rehidden > 0 && cachedPrs?.length) {
+      refreshReviewBadges(document, cachedPrs);
+    }
 
     if (!treeModeEnabled) {
       if (countMissingDecorations(document, cachedPrs || []) > 0) {
