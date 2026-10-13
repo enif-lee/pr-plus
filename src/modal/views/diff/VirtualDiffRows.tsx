@@ -482,6 +482,7 @@ export function FileHeaderRow(props: {
       style={{ height: ROW_HEIGHT }}
       data-row-index={sticky ? undefined : row.rowIndex}
       data-file-path={row.filePath || ''}
+      data-prp-selection-anchor={sticky ? undefined : '1'}
     >
       {headerEl}
       {selectionIsland}
@@ -1076,6 +1077,7 @@ export const DiffCodeLine = memo(function DiffCodeLine({
       style={{ minHeight: h }}
       data-row-index={row.rowIndex}
       data-dock-side={isSplit ? dockSide : undefined}
+      data-prp-selection-anchor="1"
     >
       {lineEl}
       {selectionIsland}

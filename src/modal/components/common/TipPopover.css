@@ -1018,6 +1018,8 @@ a.prp-branch-tag__text:focus-visible {
 .prp-diff-pane {
   position: relative;
 }
+/* In-flow z-index cannot clear the file-focus outline: `.prp-vlist__window`'s
+   translate3d traps it. `.prp-selection-float-layer` is the layer that does. */
 .prp-selection-island {
   z-index: var(--prp-z-sticky, 10);
   padding: 14px 16px;

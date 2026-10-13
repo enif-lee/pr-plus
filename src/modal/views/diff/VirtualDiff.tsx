@@ -54,6 +54,7 @@ import {
   toggleExpandKey,
   capExpandedLineHeight,
 } from '@lib/line-expand';
+import { syncSelectionFloatLayer } from '@lib/selection-float-layer';
 import { IconDisclosure } from '@common/icons';
 import { FloatingScrollbar } from '../../components/common/FloatingScrollbar';
 import { ImageViewer } from '@common/ImageViewer';
@@ -925,6 +926,12 @@ function VirtualDiffImpl(props: any) {
     };
   }, [listRef, virtualRows?.length, measuredH]);
 
+  // Window translate updates on this commit. Re-glue the portaled dock
+  // before paint so it stays on the anchor row, above the focus outline.
+  useLayoutEffect(() => {
+    syncSelectionFloatLayer(listRef?.current as HTMLElement | null);
+  });
+
   return (
     <div className="prp-vlist-host">
       {/*
@@ -1341,6 +1348,10 @@ function VirtualDiffImpl(props: any) {
           virtualRows={virtualRows}
           offsets={offsets}
           dimUnfocused={dimUnfocused}
+        />
+        <div
+          className="prp-selection-float-layer"
+          data-prp-selection-float="1"
         />
       </div>
       </div>

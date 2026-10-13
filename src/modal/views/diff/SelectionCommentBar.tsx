@@ -1,4 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { syncSelectionFloatLayer } from '@lib/selection-float-layer';
 import { Button } from '@common/Button';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { TipPopover } from '@common/TipPopover';
@@ -92,6 +94,8 @@ function readSelectionExtentRect(
  * Selection floating UI — actions group or comment composer.
  * Mounted under the selection-end row (or file header) so it scrolls
  * with the virtual list and unmounts when that row leaves the window.
+ * Inside the virtual window it is portaled to `.prp-selection-float-layer`
+ * so the file-focus outline and unfocused dim cannot paint over it.
  * Flips above the host when the Diff scroller has too little room below.
  */
 export function SelectionCommentBar(props: any) {
@@ -130,6 +134,8 @@ export function SelectionCommentBar(props: any) {
   // Must be unconditional (before phase === 'actions' early return) — Rules of Hooks.
   const [selComposerFocused, setSelComposerFocused] = useState(false);
   const dockRef = useRef<HTMLDivElement | null>(null);
+  const probeRef = useRef<HTMLSpanElement | null>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [dockPlacement, setDockPlacement] = useState<'below' | 'above'>('below');
 
   const isFileTarget =
@@ -171,6 +177,10 @@ export function SelectionCommentBar(props: any) {
     const measure = () => {
       const dock = dockRef.current;
       if (!dock || typeof dock.getBoundingClientRect !== 'function') return;
+      const vlist =
+        (dock.closest?.('.prp-vlist') as HTMLElement | null) ||
+        (probeRef.current?.closest?.('.prp-vlist') as HTMLElement | null);
+      if (vlist) syncSelectionFloatLayer(vlist);
       const host =
         (dock.closest?.('.prp-sel-dock-host') as HTMLElement | null) ||
         (dock.parentElement as HTMLElement | null);
@@ -260,6 +270,22 @@ export function SelectionCommentBar(props: any) {
     selection?.filePath,
   ]);
 
+  // Portal only while the anchor row is inside the translated window.
+  // The sticky header clone is outside `.prp-vlist` and already stacks
+  // above the outline; portaling it would slip it back under that header.
+  useLayoutEffect(() => {
+    const anchor = probeRef.current?.parentElement ?? null;
+    const vlist =
+      (anchor?.closest?.('.prp-vlist') as HTMLElement | null) ||
+      (dockRef.current?.closest?.('.prp-vlist') as HTMLElement | null);
+    const layer =
+      (vlist?.querySelector?.(
+        '[data-prp-selection-float="1"]'
+      ) as HTMLElement | null) || null;
+    setPortalTarget((prev) => (prev === layer ? prev : layer));
+    if (vlist) syncSelectionFloatLayer(vlist);
+  });
+
   if (!selection || typeof normalizeSelection !== 'function') return null;
   const norm = normalizeSelection(selection);
   if (!norm) return null;
@@ -341,11 +367,28 @@ export function SelectionCommentBar(props: any) {
         ? 'top'
         : 'bottom';
 
+  function placeDock(dock: React.ReactNode) {
+    const shell = (
+      <div
+        className="prp-portal prp-sel-dock-host"
+        data-prp-selection-float-shell="1"
+      >
+        {dock}
+      </div>
+    );
+    return (
+      <>
+        <span ref={probeRef} data-prp-selection-anchor-probe="1" hidden />
+        {portalTarget ? createPortal(shell, portalTarget) : dock}
+      </>
+    );
+  }
+
   if (phase === 'actions') {
     const kbdComment = `${opt}C`;
     const kbdCopyCode = `${mod}C`;
     const kbdCopyUrl = `${mod}${opt}C`;
-    return (
+    return placeDock(
       <div
         ref={dockRef}
         className={`prp-selection-dock prp-selection-group${
@@ -457,7 +500,7 @@ export function SelectionCommentBar(props: any) {
   const submitPrimary = canImmediate ? onSubmitImmediate : onSubmitPending;
   const hintsLive = Boolean(showOptHints || selComposerFocused);
 
-  return (
+  return placeDock(
     <div
       ref={dockRef}
       className={`prp-selection-dock prp-selection-island prp-selection-island--comment${

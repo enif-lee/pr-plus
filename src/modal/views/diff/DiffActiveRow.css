@@ -330,6 +330,31 @@
 }
 
 /*
+ * Selection dock portal. The in-flow dock sits inside `.prp-vlist__window`
+ * (translate3d stacking context), so the focus outline and the dim host —
+ * later siblings — paint over it. The portaled shell in this layer is above
+ * both and still inside the scroller, under the sticky file header.
+ */
+.prp-selection-float-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  z-index: var(--prp-z-island, 70);
+  pointer-events: none;
+}
+.prp-selection-float-layer > .prp-sel-dock-host {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 0;
+  z-index: auto;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/*
  * Full-file focus outline: one overlay in the virtual spacer so the ring
  * wraps the whole focused file (header + body + threads), not the header
  * strip. Ring is inset — `.prp-vlist` contain:paint clips a 2px outset at
