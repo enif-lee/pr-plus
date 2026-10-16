@@ -836,3 +836,225 @@ export function resolveEmbedAutoOpen(
     reason: 'first-entry',
   };
 }
+
+export type GithubPrPageDomSeed = {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  body: string;
+  author: string;
+  authorAvatarUrl: string;
+  baseRef: string;
+  headRef: string;
+  state: 'open' | 'closed';
+  draft: boolean;
+  merged: boolean;
+  _fromDom: true;
+};
+
+/**
+ * Scrape SSR PR header + first comment body from native GitHub `/pull/N` DOM
+ * so direct PR page opens can paint real title and description at 0ms before
+ * SW network `fetchPrDetail` completes.
+ */
+export function scrapeGithubPrPageSeed(
+  doc:
+    | {
+        querySelectorAll?: (sel: string) => ArrayLike<any>;
+        location?: { pathname?: string } | null;
+      }
+    | null
+    | undefined,
+  owner: unknown,
+  repo: unknown,
+  number: unknown
+): GithubPrPageDomSeed | null {
+  if (!doc || typeof doc.querySelectorAll !== 'function') return null;
+  const n = Number(number);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const o = String(owner || '').trim();
+  const r = String(repo || '').trim();
+  if (!o || !r) return null;
+
+  const locPath = String(
+    doc.location?.pathname ??
+      (typeof location !== 'undefined' ? location.pathname : '')
+  ).trim();
+  if (locPath) {
+    const target = parsePrPagePath(locPath);
+    if (
+      !target ||
+      target.owner.toLowerCase() !== o.toLowerCase() ||
+      target.repo.toLowerCase() !== r.toLowerCase() ||
+      Number(target.number) !== n
+    ) {
+      return null;
+    }
+  }
+
+  const isInsidePrp = (el: any): boolean => {
+    try {
+      return Boolean(
+        el?.closest?.(
+          `#${PAGE_EMBED_HOST_ID}, .prp-page-embed, .prp-overlay, #prp-modal-host`
+        )
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const firstOutsidePrp = (selectors: readonly string[]): any => {
+    for (const sel of selectors) {
+      let list: ArrayLike<any>;
+      try {
+        list = doc.querySelectorAll!(sel);
+      } catch {
+        continue;
+      }
+      for (let i = 0; i < (list?.length || 0); i++) {
+        const el = list[i];
+        if (!el || isInsidePrp(el)) continue;
+        return el;
+      }
+    }
+    return null;
+  };
+
+  // Verify SSR DOM PR number when present so SPA history.replaceState (switching PRs
+  // inside embed) never scrapes the original page's SSR DOM into another PR number.
+  const domNumEl = firstOutsidePrp([
+    '.gh-header-title .f1-light',
+    '.gh-header-number',
+    '[data-component="PH_Title"] span.fgColor-muted',
+  ]);
+  if (domNumEl) {
+    const m = /#(\d+)\b/.exec(String(domNumEl.textContent || ''));
+    if (m && Number(m[1]) !== n) return null;
+  }
+
+  const titleEl = firstOutsidePrp([
+    '.gh-header-title .js-issue-title',
+    'bdi.js-issue-title',
+    '.js-issue-title',
+    '[data-testid="issue-title"]',
+    '[data-component="PH_Title"] h1 bdi',
+    '[data-component="PH_Title"] bdi',
+    'h1.gh-header-title bdi',
+  ]);
+  const title = String(titleEl?.textContent || '').trim();
+  if (!title) return null;
+
+  let body = '';
+  const rawTextarea = firstOutsidePrp([
+    '.js-command-palette-issue-body textarea[name="pull_request[body]"]',
+    '.js-command-palette-issue-body textarea[name="issue[body]"]',
+    '[id^="issue-"] textarea[name="pull_request[body]"]',
+    '[id^="issue-"] textarea[name="issue[body]"]',
+    'textarea[name="pull_request[body]"]',
+  ]);
+  if (rawTextarea) {
+    const rawVal =
+      rawTextarea.value !== undefined
+        ? rawTextarea.value
+        : rawTextarea.textContent;
+    if (rawVal != null) body = String(rawVal);
+  } else {
+    const bodyEl = firstOutsidePrp([
+      '.js-command-palette-issue-body .js-comment-body',
+      '[id^="issue-"] .js-comment-body',
+      '[data-testid="issue-body"] .markdown-body',
+      '.pull-discussion-timeline .TimelineItem:first-of-type .js-comment-body',
+      '.js-discussion .TimelineItem:first-of-type .js-comment-body',
+    ]);
+    if (bodyEl) {
+      const text = String(bodyEl.textContent || '').trim();
+      const isEmptyPlaceholder =
+        /^No description provided\.?$/i.test(text) &&
+        Boolean(
+          bodyEl.querySelector?.('.text-italic, em, i') ||
+            String(bodyEl.innerHTML || '').includes('text-italic')
+        );
+      if (!isEmptyPlaceholder) {
+        body = text;
+      }
+    }
+  }
+
+  const authorEl = firstOutsidePrp([
+    '.gh-header-meta .author',
+    '[data-testid="issue-header"] a.author',
+    '.TimelineItem:first-of-type .author',
+  ]);
+  const author = String(authorEl?.textContent || '').trim();
+
+  const avatarEl = firstOutsidePrp([
+    '.TimelineItem:first-of-type img.avatar',
+    '.gh-header-meta img.avatar',
+  ]);
+  const authorAvatarUrl = String(avatarEl?.getAttribute?.('src') || '').trim();
+
+  const readRefText = (selectors: readonly string[]): string => {
+    const el = firstOutsidePrp(selectors);
+    if (!el) return '';
+    try {
+      const spans = el.querySelectorAll?.('.css-truncate-target');
+      if (spans && spans.length > 0) {
+        return String(spans[spans.length - 1]?.textContent || '').trim();
+      }
+    } catch {
+      /* fall through */
+    }
+    return String(el.textContent || '').trim();
+  };
+
+  const baseRef = readRefText([
+    '.commit-ref.base-ref',
+    '[data-testid="base-ref"]',
+  ]);
+  const headRef = readRefText([
+    '.commit-ref.head-ref',
+    '[data-testid="head-ref"]',
+  ]);
+
+  const stateEl = firstOutsidePrp([
+    '.gh-header-meta .State',
+    '[data-testid="header-state"]',
+    '.gh-header-show .State',
+    '[data-component="PH_LeadingVisual"] [data-status]',
+    '.gh-header [data-status]',
+  ]);
+  const stateRaw = `${stateEl?.getAttribute?.('title') || ''} ${
+    stateEl?.getAttribute?.('data-status') || ''
+  } ${stateEl?.textContent || ''}`.trim();
+  let state: 'open' | 'closed' = 'open';
+  let merged = false;
+  let draft = false;
+  if (/merged/i.test(stateRaw)) {
+    state = 'closed';
+    merged = true;
+  } else if (/draft/i.test(stateRaw)) {
+    state = 'open';
+    draft = true;
+  } else if (/closed/i.test(stateRaw)) {
+    state = 'closed';
+  }
+
+  return {
+    owner: o,
+    repo: r,
+    number: n,
+    title,
+    body,
+    author,
+    authorAvatarUrl,
+    baseRef,
+    headRef,
+    state,
+    draft,
+    merged,
+    _fromDom: true,
+  };
+}
+

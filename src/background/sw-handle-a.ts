@@ -312,7 +312,12 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
           {
             skipReviewThreads: Boolean(message.skipReviewThreads),
             threadsMaxPages:
-              message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1, ctx: apiCtx }
+              message.threadsMaxPages != null ? Number(message.threadsMaxPages) : 1,
+            fastIdentityOnly: Boolean(message.fastIdentityOnly),
+            retryMilestone: Boolean(message.retryMilestone),
+            coalesceKey: message.coalesceKey || null,
+            ctx: apiCtx,
+          }
         );
         return { ok: true, detail };
       } catch (err) {

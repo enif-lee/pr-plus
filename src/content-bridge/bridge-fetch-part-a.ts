@@ -52,7 +52,7 @@ export const prTreeFetchPartA = {
     return res.prs || [];
   },
   /**
-   * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number }} [opts]
+   * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, fastIdentityOnly?: boolean, retryMilestone?: boolean, coalesceKey?: string }} [opts]
    */
   async fetchPrDetail(owner: any, repo: any, number: any, opts: any = {}) {
     const t0 =
@@ -67,6 +67,9 @@ export const prTreeFetchPartA = {
         number,
         skipReviewThreads: Boolean(opts.skipReviewThreads),
         threadsMaxPages: opts.threadsMaxPages,
+        fastIdentityOnly: Boolean(opts.fastIdentityOnly),
+        retryMilestone: Boolean(opts.retryMilestone),
+        coalesceKey: opts.coalesceKey || null,
       },
       { signal: opts.signal || null }
     );

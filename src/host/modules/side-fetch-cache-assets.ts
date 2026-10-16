@@ -503,19 +503,63 @@
   }
 
   /**
-   * Minimal detail from list API row so header/title/body paint immediately.
-   * Marked `_sketch: true` so later cache/network can upgrade freely.
+   * Minimal detail from list API row (or SSR `/pull/N` DOM) so header/title/body
+   * paint immediately at 0ms. Marked `_sketch: true` so later cache/network can
+   * upgrade freely.
    */
   function detailSketchFromList(listPr: any, owner: any, repo: any, number: any) {
     const n = Number(number);
     if (!Number.isFinite(n) || n <= 0) return null;
+    let src = listPr;
+    if (
+      !src ||
+      !String(src.title || '').trim() ||
+      src.body == null ||
+      String(src.body) === '' ||
+      !src.baseRef ||
+      !src.headRef
+    ) {
+      try {
+        const pe = pageEmbedApi();
+        const domSeed =
+          typeof document !== 'undefined' &&
+          typeof pe?.scrapeGithubPrPageSeed === 'function'
+            ? pe.scrapeGithubPrPageSeed(document, owner, repo, n)
+            : null;
+        if (domSeed) {
+          src = src
+            ? {
+                ...domSeed,
+                ...src,
+                title: String(src.title || domSeed.title || '').trim(),
+                body:
+                  src.body != null && String(src.body) !== ''
+                    ? src.body
+                    : domSeed.body,
+                author: src.author || domSeed.author,
+                authorAvatarUrl:
+                  src.authorAvatarUrl ||
+                  src.avatarUrl ||
+                  domSeed.authorAvatarUrl,
+                baseRef: src.baseRef || domSeed.baseRef,
+                headRef: src.headRef || domSeed.headRef,
+                state: src.state || domSeed.state,
+                draft: src.draft ?? domSeed.draft,
+                merged: src.merged ?? domSeed.merged,
+              }
+            : domSeed;
+        }
+      } catch {
+        /* ignore DOM scrape errors */
+      }
+    }
     const title =
-      (listPr && String(listPr.title || '').trim()) || `Pull Request #${n}`;
-    const body = listPr && listPr.body != null ? String(listPr.body) : '';
-    const author = (listPr && listPr.author) || '';
+      (src && String(src.title || '').trim()) || `Pull Request #${n}`;
+    const body = src && src.body != null ? String(src.body) : '';
+    const author = (src && src.author) || '';
     // Labels: normalize to { name, color, description }
-    const labels = Array.isArray(listPr?.labels)
-      ? listPr.labels
+    const labels = Array.isArray(src?.labels)
+      ? src.labels
           .map((l: any) =>
             typeof l === 'string'
               ? { name: l, color: '', description: '' }
@@ -528,20 +572,20 @@
           .filter((l: any) => l.name)
       : [];
     // Assignees: login strings (MetaList shape)
-    const assignees = Array.isArray(listPr?.assignees)
-      ? listPr.assignees
+    const assignees = Array.isArray(src?.assignees)
+      ? src.assignees
           .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
           .filter(Boolean)
       : [];
-    const requestedReviewers = Array.isArray(listPr?.requestedReviewers)
-      ? listPr.requestedReviewers
+    const requestedReviewers = Array.isArray(src?.requestedReviewers)
+      ? src.requestedReviewers
           .map((u: any) => (typeof u === 'string' ? u : u?.login || ''))
           .filter(Boolean)
       : [];
     // Milestone: { number, title, state, dueOn }
     let milestone: any = null;
-    if (listPr?.milestone && typeof listPr.milestone === 'object') {
-      const m = listPr.milestone;
+    if (src?.milestone && typeof src.milestone === 'object') {
+      const m = src.milestone;
       if (m.number != null || m.title) {
         milestone = {
           number: m.number != null ? Number(m.number) : null,
@@ -552,29 +596,36 @@
       }
     }
     const avatarUrls =
-      listPr?.avatarUrls && typeof listPr.avatarUrls === 'object'
-        ? { ...listPr.avatarUrls }
+      src?.avatarUrls && typeof src.avatarUrls === 'object'
+        ? { ...src.avatarUrls }
         : {};
-    if (author && listPr?.authorAvatarUrl) {
-      avatarUrls[String(author).toLowerCase()] = listPr.authorAvatarUrl;
+    const authorAvatarUrl = src?.authorAvatarUrl || src?.avatarUrl || '';
+    if (author && authorAvatarUrl) {
+      avatarUrls[String(author).toLowerCase()] = authorAvatarUrl;
     }
+    const merged = Boolean(src?.merged);
+    const state = merged
+      ? 'closed'
+      : src?.state === 'closed' || src?.state === 'open'
+        ? src.state
+        : 'open';
     return {
       owner: String(owner || ''),
       repo: String(repo || ''),
       number: n,
-      nodeId: listPr?.nodeId || listPr?.node_id || null,
+      nodeId: src?.nodeId || src?.node_id || null,
       title,
       body,
-      state: 'open',
-      draft: Boolean(listPr?.draft),
+      state,
+      draft: Boolean(src?.draft),
       author,
-      authorAvatarUrl: listPr?.authorAvatarUrl || listPr?.avatarUrl || '',
-      baseRef: listPr?.baseRef || '',
-      headRef: listPr?.headRef || '',
+      authorAvatarUrl,
+      baseRef: src?.baseRef || '',
+      headRef: src?.headRef || '',
       htmlUrl:
-        listPr?.htmlUrl ||
+        src?.htmlUrl ||
         `https://github.com/${owner}/${repo}/pull/${n}`,
-      merged: false,
+      merged,
       mergeable: null as any,
       labels,
       assignees,
@@ -589,9 +640,9 @@
       reviewThreads: [] as any[],
       commits: [] as any[],
       checks: { state: 'unknown', totalCount: 0, statuses: [] as any[], checkRuns: [] as any[] },
-      additions: listPr?.additions ?? null,
-      deletions: listPr?.deletions ?? null,
-      changedFiles: listPr?.changedFiles ?? null,
+      additions: src?.additions ?? null,
+      deletions: src?.deletions ?? null,
+      changedFiles: src?.changedFiles ?? null,
       subscribed: null as any,
       _sketch: true,
       _source: 'list',

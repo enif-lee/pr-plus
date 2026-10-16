@@ -424,6 +424,7 @@
           const curRank = detailRank(current.detail);
           const idbRank = detailRank(v);
           if (curRank >= 2 && !current.detail?._sketch) {
+            if (!cached) cached = v;
             return v;
           }
           if (
@@ -534,6 +535,7 @@
       /** @type {any} */
       let earlyThreadsPage: any = null;
       let corePainted = false;
+      let fastCorePainted = false;
       let threadsPaintedEarly = false;
 
       /** Merge SWR preserve fields from cache into network core detail. */
@@ -690,7 +692,8 @@
       }
 
       /** Immediate partial paint when core fetch resolves (do not wait for threads/IDB). */
-      function paintCoreNow(raw: any) {
+      function paintCoreNow(raw: any, coreOpts: { fastOnly?: boolean } = {}) {
+        const isFastOnly = Boolean(coreOpts?.fastOnly);
         if (!openStill() || !raw) return null;
         try {
           const rawMs = raw?.milestone;
@@ -859,21 +862,25 @@
         current.loading = false;
         current.error = null;
         const detail = current.detail;
-        detailCache.set(key, detail);
-        corePainted = true;
-        prog.mark('core', uw.core, corePhase, coreLabel);
-        setLoadStage(
-          'threads',
-          fromCache || detailRank(cached) >= 3
-            ? loadStageLabel('threads-update')
-            : loadStageLabel('threads-load'),
-          true,
-          { percent: Math.min(99, prog.percent()) }
-        );
-        tryFinishOpenProgress(prog);
+        if (isFastOnly) {
+          fastCorePainted = true;
+        } else {
+          detailCache.set(key, detail);
+          corePainted = true;
+          prog.mark('core', uw.core, corePhase, coreLabel);
+          setLoadStage(
+            'threads',
+            fromCache || detailRank(cached) >= 3
+              ? loadStageLabel('threads-update')
+              : loadStageLabel('threads-load'),
+            true,
+            { percent: Math.min(99, prog.percent()) }
+          );
+          tryFinishOpenProgress(prog);
+        }
         render();
         console.log(
-          `[pr-plus] openModal phase=core-paint ${owner}/${repo}#${number} ` +
+          `[pr-plus] openModal phase=${isFastOnly ? 'core-fast-paint' : 'core-paint'} ${owner}/${repo}#${number} ` +
             `(prior=${fromCache ? 'cache' : fromList ? 'list' : 'empty'}) pct=${prog.percent()}`
         );
         // Under-shell list row must track network meta (incl. empty labels).
@@ -1084,9 +1091,46 @@
           ? (name: any, p: any, meta: any = undefined) => tl.span(name, p, meta)
           : (_n: any, p: any, _m: any = undefined) => p;
 
+      const coreCoalesceKey = `${owner}/${repo}#${number}:${gen}`;
+      // Stage-1 fast identity fetch (title, body, author, labels, branch refs, headSha)
+      // shares Stage-1 HTTP promises with coreP via coreCoalesceKey and paints in 1 RTT.
+      void span(
+        'fetch.coreFast',
+        fetchDetailOnce({
+          skipReviewThreads: true,
+          fastIdentityOnly: true,
+          coalesceKey: coreCoalesceKey,
+        }).then((fastD) => {
+          if (!fastD || corePainted) return null;
+          paintCoreNow(fastD, { fastOnly: true });
+          tl?.mark?.('paint.coreFast', 'mark', {
+            note: fastD?.title ? String(fastD.title).slice(0, 40) : 'coreFast',
+            headSha: fastD?.headSha ? String(fastD.headSha).slice(0, 7) : null,
+          });
+          return fastD;
+        })
+      ).catch(() => {});
+
+      // Core fetch: mark + partial paint on resolve (may finish before or after threads)
+      const coreP = span(
+        'fetch.core',
+        fetchDetailOnce({
+          skipReviewThreads: true,
+          coalesceKey: coreCoalesceKey,
+        }).then((d) => {
+          prog.mark('core', uw.core, corePhase, coreLabel);
+          paintCoreNow(d);
+          tl?.mark?.('paint.core', 'mark', {
+            note: d?.title ? String(d.title).slice(0, 40) : 'core',
+            headSha: d?.headSha ? String(d.headSha).slice(0, 7) : null,
+          });
+          return d;
+        })
+      );
+
       // GraphQL shell newest window (page size 100, PRRT always).
       // Await IDB hydrate (≤~400ms) so list/empty opens can use warm cache when
-      // durable threads already exist — first paint already happened above.
+      // durable threads already exist — first paint + core network already started above.
       try {
         await idbHydrateP;
       } catch {
@@ -1258,20 +1302,6 @@
             return r;
           });
 
-      // Core fetch: mark + partial paint on resolve (may finish before or after threads)
-      const coreP = span(
-        'fetch.core',
-        fetchDetailOnce({ skipReviewThreads: true }).then((d) => {
-          prog.mark('core', uw.core, corePhase, coreLabel);
-          paintCoreNow(d);
-          tl?.mark?.('paint.core', 'mark', {
-            note: d?.title ? String(d.title).slice(0, 40) : 'core',
-            headSha: d?.headSha ? String(d.headSha).slice(0, 7) : null,
-          });
-          return d;
-        })
-      );
-
       // Non-blocking IDB upgrade (must not delay core paint)
       void idbHydrateP
         .then((idbVal) => {
@@ -1284,7 +1314,10 @@
             current.detail &&
             (current.detail._sketch || detailRank(current.detail) < detailRank(idbVal))
           ) {
-            resetDetailStoreFromFlat(idbVal);
+            const nextFlat = fastCorePainted
+              ? mergeCoreWithCache(current.detail, idbVal)
+              : idbVal;
+            resetDetailStoreFromFlat(nextFlat);
             current.loading = false;
             render();
             if (earlyThreadsPage) paintThreadsNewestNow(earlyThreadsPage);
@@ -1293,8 +1326,8 @@
               owner,
               repo,
               number,
-              headSha: idbVal.headSha || null,
-              body: idbVal.body || '',
+              headSha: nextFlat?.headSha || idbVal.headSha || null,
+              body: nextFlat?.body || idbVal.body || '',
               gen,
               stillOpenFn: openStill,
               signal,
@@ -1347,29 +1380,11 @@
         if (!(globalThis as any).PRTreeFetch?.fetchPrDetail) return null;
         return (globalThis as any).PRTreeFetch.fetchPrDetail(owner, repo, number, {
           skipReviewThreads: true,
-          // no signal — best-effort identity recovery
+          fastIdentityOnly: true,
+          retryMilestone: true,
         });
       }
-      if (
-        openStill() &&
-        current.detail &&
-        current.detail.milestone == null
-      ) {
-        try {
-          const again = await fetchIdentityDetailLoose();
-          if (openStill() && again?.milestone) {
-            paintCoreNow(again);
-            detail = current.detail || again;
-            console.log(
-              `[pr-plus] openModal phase=core-milestone-retry ${owner}/${repo}#${number} ` +
-                `ms=${again.milestone?.title || again.milestone?.number || '?'}`
-            );
-          }
-        } catch {
-          /* soft */
-        }
-      }
-      // Background settle within e2e 45s wait window.
+      // Non-blocking background settle within e2e 45s wait window.
       if (
         openStill() &&
         current.detail &&
@@ -1398,7 +1413,10 @@
                 return;
               }
               if (again?.milestone) {
-                paintCoreNow(again);
+                paintCoreNow(again, { fastOnly: true });
+                if (corePainted && current.detail) {
+                  detailCache.set(key, current.detail);
+                }
                 console.log(
                   `[pr-plus] openModal phase=core-milestone-settle#${i + 1} ${owner}/${repo}#${number} ` +
                     `ms=${again.milestone?.title || again.milestone?.number || '?'}`

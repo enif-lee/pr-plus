@@ -66,6 +66,15 @@ export function mergeIssueIdentityIntoPull(pr: any, issue: any): any {
   return next;
 }
 
+const stage1CoalesceMap = new Map<
+  string,
+  {
+    promise: Promise<[any, any, any, any]>;
+    timings: Record<string, any>;
+    timer: any;
+  }
+>();
+
 export async function fetchPrDetail(
   owner: any,
   repo: any,
@@ -77,7 +86,11 @@ export async function fetchPrDetail(
   const ctx = normalizeApiCtx(opts?.ctx);
   const base = githubRestUrl(`/repos/${owner}/${repo}`, ctx);
   const n = Number(pullNumber);
-  const skipReviewThreads = Boolean(opts.skipReviewThreads);
+  const fastIdentityOnly = Boolean(opts?.fastIdentityOnly);
+  const retryMilestone = Boolean(opts?.retryMilestone);
+  const coalesceKey =
+    opts?.coalesceKey && !retryMilestone ? String(opts.coalesceKey) : '';
+  const skipReviewThreads = fastIdentityOnly || Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
     ? 0
     : Math.max(1, Math.min(20, Number(opts.threadsMaxPages) || 1));
@@ -86,7 +99,8 @@ export async function fetchPrDetail(
   const tTotal0 = fetchNowMs();
   console.log(
     `[pr-plus] fetchPrDetail start ${owner}/${repo}#${n}` +
-      ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}`
+      ` skipReviewThreads=${skipReviewThreads} threadsMaxPages=${threadsMaxPages}` +
+      (fastIdentityOnly ? ' fastIdentityOnly=true' : '')
   );
 
   // Lean core: pull + issue identity + viewer + autolinks.
@@ -105,59 +119,98 @@ export async function fetchPrDetail(
   const noCache = {
     cache: 'no-store' as RequestCache,
   };
-  let [pr, issue, viewerLogin, autolinks] = await Promise.all([
-    timedFetch(
-      timings,
-      'pull',
-      // Bust intermediary caches so hard-reopen after modal meta writes sees
-      // the same milestone/title as authenticated `gh api` (e2e MB3/MB7).
-      apiJson(`${base}/pulls/${n}?${bust()}`, fetchImpl, token, noCache),
-      null,
-      batchOpt
-    ),
-    token
-      ? timedFetch(
-          timings,
-          'issue',
-          apiJson(`${base}/issues/${n}?${bust()}`, fetchImpl, token, noCache).catch(
-            (err): any => {
-              if (
-                err?.name === 'AbortError' ||
-                /aborted|AbortError/i.test(String(err?.message || ''))
-              ) {
-                throw err;
+  const runStage1 = (tBag: Record<string, any>) =>
+    Promise.all([
+      timedFetch(
+        tBag,
+        'pull',
+        // Bust intermediary caches so hard-reopen after modal meta writes sees
+        // the same milestone/title as authenticated `gh api` (e2e MB3/MB7).
+        apiJson(`${base}/pulls/${n}?${bust()}`, fetchImpl, token, noCache),
+        null,
+        batchOpt
+      ),
+      token
+        ? timedFetch(
+            tBag,
+            'issue',
+            apiJson(`${base}/issues/${n}?${bust()}`, fetchImpl, token, noCache).catch(
+              (err): any => {
+                if (
+                  err?.name === 'AbortError' ||
+                  /aborted|AbortError/i.test(String(err?.message || ''))
+                ) {
+                  throw err;
+                }
+                return null;
               }
-              return null;
-            }
-          ),
-          null,
-          batchOpt
-        )
-      : Promise.resolve(null),
-    timedFetch(
-      timings,
-      'viewerLogin',
-      fetchViewerLogin(fetchImpl, token, ctx),
-      null,
-      batchOpt
-    ),
-    timedFetch(
-      timings,
-      'autolinks',
-      fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
-      (r: any) => `(${Array.isArray(r) ? r.length : 0} links)`,
-      batchOpt
-    ),
-  ]);
+            ),
+            null,
+            batchOpt
+          )
+        : Promise.resolve(null),
+      timedFetch(
+        tBag,
+        'viewerLogin',
+        fetchViewerLogin(fetchImpl, token, ctx),
+        null,
+        batchOpt
+      ),
+      timedFetch(
+        tBag,
+        'autolinks',
+        fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
+        (r: any) => `(${Array.isArray(r) ? r.length : 0} links)`,
+        batchOpt
+      ),
+    ]);
+
+  let stage1Promise: Promise<[any, any, any, any]>;
+  let stage1Timings: Record<string, any> = timings;
+  if (coalesceKey && stage1CoalesceMap.has(coalesceKey)) {
+    const entry = stage1CoalesceMap.get(coalesceKey)!;
+    stage1Promise = entry.promise;
+    stage1Timings = entry.timings;
+  } else if (coalesceKey) {
+    stage1Timings = {};
+    const p = runStage1(stage1Timings);
+    const timer = setTimeout(() => {
+      stage1CoalesceMap.delete(coalesceKey);
+    }, 5000);
+    try {
+      if (timer && typeof (timer as any).unref === 'function') {
+        (timer as any).unref();
+      }
+    } catch {
+      /* ignore */
+    }
+    stage1CoalesceMap.set(coalesceKey, {
+      promise: p,
+      timings: stage1Timings,
+      timer,
+    });
+    p.catch(() => {
+      clearTimeout(timer);
+      stage1CoalesceMap.delete(coalesceKey);
+    });
+    stage1Promise = p;
+  } else {
+    stage1Promise = runStage1(timings);
+  }
+
+  let [pr, issue, viewerLogin, autolinks] = await stage1Promise;
+  if (stage1Timings !== timings) {
+    Object.assign(timings, stage1Timings);
+  }
   // Prefer issue REST for people-meta identity when present (milestone/labels/
   // assignees). Pull can lag or omit milestone after modal set (soft/hard reopen).
   if (pr && issue && typeof issue === 'object') {
     pr = mergeIssueIdentityIntoPull(pr, issue);
   }
-  // One immediate re-GET when parallel path missed milestone (soft-fail / race).
-  // Further host-side polls happen only when openModal expects a board (authority).
-  // Always no-store + bust so hard reopen cannot stick on a pre-write HTTP cache.
-  if (pr && !pr.milestone && token) {
+  // Only re-GET milestone when parallel issue request soft-failed (issue == null)
+  // or caller explicitly requested retryMilestone (background recovery poll).
+  // Avoids 2 extra serial REST round-trips on every milestone-less PR open.
+  if (pr && !pr.milestone && token && (issue == null || retryMilestone)) {
     try {
       const issueRetry = await timedFetch(
         timings,
@@ -219,7 +272,6 @@ export async function fetchPrDetail(
   console.log(
     '[pr-plus] fetchPrDetail files/comments/reviews/commits/checks/development: deferred (independent fetches)'
   );
-  const files = [];
   const commentsPage = {
     items: [] as any[],
     meta: {
@@ -232,18 +284,8 @@ export async function fetchPrDetail(
     },
   };
   const reviews: any[] = [];
+  const comments = commentsPage?.items || [];
 
-  // GitHub computes mergeable async on first GET (often null/unknown).
-  // Re-fetch once so conflict (dirty) is not mislabeled as "still calculating".
-  pr = await resolvePrMergeability(pr, base, n, fetchImpl, token, timings, {
-    owner,
-    repo,
-    apiCtx: ctx,
-  });
-
-  // Repo Settings → Pull Requests merge method toggles (drive merge-box menu).
-  // Prefer nested base.repo from the PR payload; fall back to GET /repos when missing.
-  // Also resolve viewer admin (bypass-rules); nested PR repo objects usually omit permissions.
   let repoMergeFlags =
     extractRepoMergeMethodFlags(pr?.base?.repo) ||
     extractRepoMergeMethodFlags(pr?.head?.repo) ||
@@ -252,59 +294,7 @@ export async function fetchPrDetail(
     extractViewerCanMergeAsAdmin(pr?.base?.repo) ??
     extractViewerCanMergeAsAdmin(pr?.head?.repo) ??
     null;
-  if (!repoMergeFlags || viewerCanMergeAsAdmin == null) {
-    try {
-      const repoJson = await timedFetch(
-        timings,
-        'repoMergeSettings',
-        apiJson(base, fetchImpl, token),
-        (r: any) =>
-          `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge} admin=${r?.permissions?.admin})`
-      );
-      if (!repoMergeFlags) {
-        repoMergeFlags = extractRepoMergeMethodFlags(repoJson);
-      }
-      if (viewerCanMergeAsAdmin == null) {
-        viewerCanMergeAsAdmin = extractViewerCanMergeAsAdmin(repoJson);
-      }
-    } catch (err) {
-      if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
-      ) {
-        throw err;
-      }
-      // @ts-expect-error classic fetch dynamic shapes
-      timings.repoMergeSettings = timings.repoMergeSettings || 0;
-      console.log(
-        `[pr-plus] fetchPrDetail repoMergeSettings: soft-fail ${err?.message || err}`
-      );
-      if (!repoMergeFlags) repoMergeFlags = null;
-    }
-  } else {
-    // @ts-expect-error classic fetch dynamic shapes
-    timings.repoMergeSettings = 0;
-  }
-
-  // GraphQL viewerSubscription (REST issues/.../subscription is 404 / dead)
-  const subscription = await timedFetch(
-    timings,
-    'subscription',
-    token
-      ? fetchPullRequestSubscription(
-          owner,
-          repo,
-          n,
-          fetchImpl,
-          token,
-          pr?.node_id || null,
-          ctx
-        )
-      : Promise.resolve(null)
-  );
-  const comments = commentsPage?.items || [];
-
-  // First page (or zero) of review threads — not the full 500+ dump
+  let subscription: any = null;
   let reviewThreadBundle = {
     threads: [] as any[],
     comments: [] as any[],
@@ -312,167 +302,291 @@ export async function fetchPrDetail(
     endCursor: null as any,
     pageCount: 0,
   };
-  if (token && threadsMaxPages > 0) {
-    reviewThreadBundle = await timedFetch(
-      timings,
-      'reviewThreads',
-      fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
-        cursor: opts.threadsCursor || null,
-        maxPages: threadsMaxPages,
-        ctx,
-      }).catch((err) => {
-        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-          throw err;
-        }
-        return reviewThreadBundle;
-      }),
-      (b: any) =>
-        `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
-    );
-  } else {
-  // @ts-expect-error classic fetch dynamic shapes
-    timings.reviewThreads = 0;
-    console.log(
-      `[pr-plus] fetchPrDetail reviewThreads: skipped (token=${Boolean(
-        token
-      )} maxPages=${threadsMaxPages})`
-    );
-  }
+  let pendingBundle = { comments: [] as any[], review: null as any };
+  let bodyReactions = mapRestReactions(pr.reactions);
 
-  // REST fallback when GraphQL is rate-limited or returns empty. Diff inline
-  // threads group from reviewComments; without this, ⌥J/K nav has zero threads
-  // after GraphQL exhaustion while REST core quota remains.
-  if (
-    token &&
-    threadsMaxPages > 0 &&
-    !(Array.isArray(reviewThreadBundle?.comments) && reviewThreadBundle.comments.length > 0)
-  ) {
-    try {
-      const restPage = await timedFetch(
-        timings,
-        'reviewThreadsRest',
-        fetchPrCommentsPage(
-          owner,
-          repo,
-          n,
-          'review',
-          { page: 1, perPage: 100, preferNewest: true },
-          fetchImpl,
-          token,
-          ctx
-        ).catch((err): any => {
+  if (!fastIdentityOnly) {
+    // Run all secondary core enrichments in parallel rather than 6 serial waves:
+    // 1. resolvePrMergeability (includes 350ms poll when mergeable is null/unknown)
+    // 2. repoMergeSettings (GET /repos/{owner}/{repo} for admin/merge method flags)
+    // 3. subscription (GraphQL viewerSubscription + mergeStateStatus)
+    // 4. reviewThreads (when threadsMaxPages > 0)
+    // 5. pendingReview (viewer's PENDING review bundle)
+    // 6. bodyReactions (GraphQL reactionGroups when total_count !== 0)
+    const mergeabilityP = resolvePrMergeability(
+      pr,
+      base,
+      n,
+      fetchImpl,
+      token,
+      timings,
+      {
+        owner,
+        repo,
+        apiCtx: ctx,
+      }
+    );
+
+    const repoSettingsP = (async () => {
+      if (!repoMergeFlags || viewerCanMergeAsAdmin == null) {
+        try {
+          const repoJson = await timedFetch(
+            timings,
+            'repoMergeSettings',
+            apiJson(base, fetchImpl, token),
+            (r: any) =>
+              `(merge=${r?.allow_merge_commit} squash=${r?.allow_squash_merge} rebase=${r?.allow_rebase_merge} admin=${r?.permissions?.admin})`
+          );
+          if (!repoMergeFlags) {
+            repoMergeFlags = extractRepoMergeMethodFlags(repoJson);
+          }
+          if (viewerCanMergeAsAdmin == null) {
+            viewerCanMergeAsAdmin = extractViewerCanMergeAsAdmin(repoJson);
+          }
+        } catch (err: any) {
           if (
             err?.name === 'AbortError' ||
             /aborted|AbortError/i.test(String(err?.message || ''))
           ) {
             throw err;
           }
-          return null;
-        }),
-        (p: any) => `(${(p?.items || []).length} rest review comments)`
-      );
-      const items = Array.isArray(restPage?.items) ? restPage.items : [];
-      if (items.length) {
-        const byId = new Map();
-        for (const c of items) {
-          if (c && c.id != null) byId.set(String(c.id), c);
+          // @ts-expect-error classic fetch dynamic shapes
+          timings.repoMergeSettings = timings.repoMergeSettings || 0;
+          console.log(
+            `[pr-plus] fetchPrDetail repoMergeSettings: soft-fail ${err?.message || err}`
+          );
+          if (!repoMergeFlags) repoMergeFlags = null;
         }
-        const roots = items.filter((c: any) => {
-          if (!c || c.id == null) return false;
-          const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
-          return parent == null || !byId.has(String(parent));
-        });
-        const threads = roots.map((r: any) => {
-          const replyIds = items
-            .filter(
-              (c: any) =>
-                c &&
-                String(c.inReplyToId ?? c.in_reply_to_id ?? '') === String(r.id)
-            )
-            .map((c: any) => c.id);
-          const threadNodeId = r.nodeId || `rest-thread-${r.id}`;
-          const commentIds = [r.id, ...replyIds];
-          for (const cid of commentIds) {
-            const row = byId.get(String(cid));
-            if (row) row.threadNodeId = threadNodeId;
-          }
-          return {
-            threadNodeId,
-            resolved: false,
-            outdated: Boolean(r.outdated),
-            path: r.path || '',
-            line: r.line ?? r.originalLine ?? null,
-            startLine: r.startLine ?? null,
-            side: r.side || 'RIGHT',
-            commentIds,
-          };
-        });
-        reviewThreadBundle = {
-          threads,
-          comments: items,
-          hasMore: Boolean(restPage?.meta?.hasMore ?? restPage?.hasMore),
-          endCursor: null,
-          pageCount: 1,
-          totalCount: items.length,
-        } as any;
+      } else {
+        // @ts-expect-error classic fetch dynamic shapes
+        timings.repoMergeSettings = 0;
+      }
+    })();
+
+    const subscriptionP = timedFetch(
+      timings,
+      'subscription',
+      token
+        ? fetchPullRequestSubscription(
+            owner,
+            repo,
+            n,
+            fetchImpl,
+            token,
+            pr?.node_id || null,
+            ctx
+          )
+        : Promise.resolve(null)
+    );
+
+    const reviewThreadsP = (async () => {
+      if (token && threadsMaxPages > 0) {
+        reviewThreadBundle = await timedFetch(
+          timings,
+          'reviewThreads',
+          fetchPullReviewThreadsBundle(owner, repo, n, fetchImpl, token, {
+            cursor: opts.threadsCursor || null,
+            maxPages: threadsMaxPages,
+            ctx,
+          }).catch((err) => {
+            if (
+              err?.name === 'AbortError' ||
+              /aborted|AbortError/i.test(String(err?.message || ''))
+            ) {
+              throw err;
+            }
+            return reviewThreadBundle;
+          }),
+          (b: any) =>
+            `(${(b?.threads || []).length} threads, ${(b?.comments || []).length} comments)`
+        );
+      } else {
+        // @ts-expect-error classic fetch dynamic shapes
+        timings.reviewThreads = 0;
         console.log(
-          `[pr-plus] fetchPrDetail reviewThreads: REST fallback ` +
-            `${threads.length} threads, ${items.length} comments`
+          `[pr-plus] fetchPrDetail reviewThreads: skipped (token=${Boolean(
+            token
+          )} maxPages=${threadsMaxPages})`
         );
       }
-    } catch (err: any) {
+
       if (
-        err?.name === 'AbortError' ||
-        /aborted|AbortError/i.test(String(err?.message || ''))
+        token &&
+        threadsMaxPages > 0 &&
+        !(
+          Array.isArray(reviewThreadBundle?.comments) &&
+          reviewThreadBundle.comments.length > 0
+        )
       ) {
-        throw err;
+        try {
+          const restPage = await timedFetch(
+            timings,
+            'reviewThreadsRest',
+            fetchPrCommentsPage(
+              owner,
+              repo,
+              n,
+              'review',
+              { page: 1, perPage: 100, preferNewest: true },
+              fetchImpl,
+              token,
+              ctx
+            ).catch((err): any => {
+              if (
+                err?.name === 'AbortError' ||
+                /aborted|AbortError/i.test(String(err?.message || ''))
+              ) {
+                throw err;
+              }
+              return null;
+            }),
+            (p: any) => `(${(p?.items || []).length} rest review comments)`
+          );
+          const items = Array.isArray(restPage?.items) ? restPage.items : [];
+          if (items.length) {
+            const byId = new Map();
+            for (const c of items) {
+              if (c && c.id != null) byId.set(String(c.id), c);
+            }
+            const roots = items.filter((c: any) => {
+              if (!c || c.id == null) return false;
+              const parent = c.inReplyToId ?? c.in_reply_to_id ?? null;
+              return parent == null || !byId.has(String(parent));
+            });
+            const threads = roots.map((r: any) => {
+              const replyIds = items
+                .filter(
+                  (c: any) =>
+                    c &&
+                    String(c.inReplyToId ?? c.in_reply_to_id ?? '') ===
+                      String(r.id)
+                )
+                .map((c: any) => c.id);
+              const threadNodeId = r.nodeId || `rest-thread-${r.id}`;
+              const commentIds = [r.id, ...replyIds];
+              for (const cid of commentIds) {
+                const row = byId.get(String(cid));
+                if (row) row.threadNodeId = threadNodeId;
+              }
+              return {
+                threadNodeId,
+                resolved: false,
+                outdated: Boolean(r.outdated),
+                path: r.path || '',
+                line: r.line ?? r.originalLine ?? null,
+                startLine: r.startLine ?? null,
+                side: r.side || 'RIGHT',
+                commentIds,
+              };
+            });
+            reviewThreadBundle = {
+              threads,
+              comments: items,
+              hasMore: Boolean(restPage?.meta?.hasMore ?? restPage?.hasMore),
+              endCursor: null,
+              pageCount: 1,
+              totalCount: items.length,
+            } as any;
+            console.log(
+              `[pr-plus] fetchPrDetail reviewThreads: REST fallback ` +
+                `${threads.length} threads, ${items.length} comments`
+            );
+          }
+        } catch (err: any) {
+          if (
+            err?.name === 'AbortError' ||
+            /aborted|AbortError/i.test(String(err?.message || ''))
+          ) {
+            throw err;
+          }
+          console.log(
+            `[pr-plus] fetchPrDetail reviewThreads REST fallback soft-fail: ${
+              err?.message || err
+            }`
+          );
+        }
       }
-      console.log(
-        `[pr-plus] fetchPrDetail reviewThreads REST fallback soft-fail: ${
-          err?.message || err
-        }`
-      );
-    }
+    })();
+
+    const pendingReviewP = token
+      ? timedFetch(
+          timings,
+          'pendingReview',
+          fetchViewerPendingReviewBundle(
+            owner,
+            repo,
+            n,
+            fetchImpl,
+            token,
+            {
+              reviews: [],
+              login: viewerLogin,
+            },
+            ctx
+          ).catch((err) => {
+            if (
+              err?.name === 'AbortError' ||
+              /aborted|AbortError/i.test(String(err?.message || ''))
+            ) {
+              throw err;
+            }
+            return { comments: [] as any[], review: null as any };
+          }),
+          (b: any) => `(${(b?.comments || []).length} pending comments)`
+        )
+      : (() => {
+          // @ts-expect-error classic fetch dynamic shapes
+          timings.pendingReview = 0;
+          console.log(
+            '[pr-plus] fetchPrDetail pendingReview: skipped (no token)'
+          );
+          return Promise.resolve({ comments: [] as any[], review: null as any });
+        })();
+
+    const hasZeroBodyReactions =
+      pr?.reactions &&
+      typeof pr.reactions === 'object' &&
+      pr.reactions.total_count !== undefined &&
+      Number(pr.reactions.total_count) === 0;
+    const bodyReactionsP = (async () => {
+      if (pr?.node_id && token && !hasZeroBodyReactions) {
+        try {
+          const byId = await fetchReactableReactionGroups(
+            [pr.node_id],
+            fetchImpl,
+            token,
+            ctx
+          );
+          const enriched = byId.get(String(pr.node_id));
+          if (enriched && enriched.length) bodyReactions = enriched;
+        } catch {
+          /* keep REST summary */
+        }
+      }
+    })();
+
+    const [resolvedPr, resolvedSub, resolvedPending] = await Promise.all([
+      mergeabilityP,
+      subscriptionP,
+      pendingReviewP,
+      repoSettingsP,
+      reviewThreadsP,
+      bodyReactionsP,
+    ]);
+    pr = resolvedPr;
+    subscription = resolvedSub;
+    pendingBundle = resolvedPending;
   }
 
   const reviewThreads = reviewThreadBundle?.threads || [];
-  // PENDING-only REST rows when GraphQL misses them (reviews list is independent;
-  // pending bundle finds PENDING via its own lookup when preloaded reviews empty).
-  let pendingBundle = { comments: [] as any[], review: null as any };
-  if (token) {
-    pendingBundle = await timedFetch(
-      timings,
-      'pendingReview',
-      fetchViewerPendingReviewBundle(
-        owner,
-        repo,
-        n,
-        fetchImpl,
-        token,
-        {
-          reviews: [],
-          login: viewerLogin,
-        },
-        ctx
-      ).catch((err) => {
-        if (err?.name === 'AbortError' || /aborted|AbortError/i.test(String(err?.message || ''))) {
-          throw err;
-        }
-        return { comments: [] as any[], review: null as any };
-      }),
-      (b: any) => `(${(b?.comments || []).length} pending comments)`
-    );
-  } else {
-  // @ts-expect-error classic fetch dynamic shapes
-    timings.pendingReview = 0;
-    console.log('[pr-plus] fetchPrDetail pendingReview: skipped (no token)');
-  }
   const pendingReviewComments = pendingBundle.comments || [];
   const reviewComments = mergePendingReviewComments(
     reviewThreadBundle?.comments || [],
     pendingReviewComments
   );
-  const viewerPendingReview = pendingBundle.review || null;
+  const viewerPendingReview = fastIdentityOnly
+    ? (undefined as any)
+    : pendingBundle.review || null;
   const reviewCommentsMeta = {
     page: 1,
     perPage: (reviewThreadBundle?.comments || []).length || COMMENT_PAGE_SIZE,
@@ -531,13 +645,15 @@ export async function fetchPrDetail(
   // @ts-expect-error classic fetch dynamic shapes
   timings.mapAnnotateFiles = 0;
 
-  const subscribed =
-    subscription && typeof subscription.subscribed === 'boolean'
+  const subscribed = fastIdentityOnly
+    ? (undefined as any)
+    : subscription && typeof subscription.subscribed === 'boolean'
       ? Boolean(subscription.subscribed)
       : null;
   // subscription.viewerSubscription kept for debugging / future UI (IGNORED)
-  const mergeStateStatus =
-    subscription && subscription.mergeStateStatus
+  const mergeStateStatus = fastIdentityOnly
+    ? (undefined as any)
+    : subscription && subscription.mergeStateStatus
       ? String(subscription.mergeStateStatus)
       : null;
 
@@ -568,23 +684,6 @@ export async function fetchPrDetail(
     }
   }
 
-  // PR body reactions (issue reactions on the PR number)
-  let bodyReactions = mapRestReactions(pr.reactions);
-  if (pr.node_id && token) {
-    try {
-      const byId = await fetchReactableReactionGroups(
-        [pr.node_id],
-        fetchImpl,
-        token,
-        ctx
-      );
-      const enriched = byId.get(String(pr.node_id));
-      if (enriched && enriched.length) bodyReactions = enriched;
-    } catch {
-      /* keep REST summary */
-    }
-  }
-
   return {
     owner,
     repo,
@@ -592,7 +691,13 @@ export async function fetchPrDetail(
     nodeId: pr.node_id || null,
     title: pr.title,
     body: pr.body || '',
-    bodyReactions,
+    bodyReactions:
+      fastIdentityOnly &&
+      pr?.reactions &&
+      Number(pr.reactions.total_count) > 0
+        ? (undefined as any)
+        : bodyReactions,
+    _fastCore: fastIdentityOnly ? true : undefined,
     // Merged PRs are closed on GitHub; never leave state=open with merged flag.
     state:
       Boolean(pr.merged) || Boolean(pr.merged_at)
@@ -630,17 +735,35 @@ export async function fetchPrDetail(
     behindBy:
       pr.behind_by != null && Number.isFinite(Number(pr.behind_by))
         ? Number(pr.behind_by)
-        : null,
+        : fastIdentityOnly
+          ? (undefined as any)
+          : null,
     /** Paths that appear modified on both base tip and head (conflict candidates). */
-    conflictFiles: Array.isArray(pr._conflictFiles) ? pr._conflictFiles : [],
+    conflictFiles: Array.isArray(pr._conflictFiles)
+      ? pr._conflictFiles
+      : fastIdentityOnly
+        ? (undefined as any)
+        : [],
     rebaseable: pr.rebaseable ?? null,
     /**
      * Repository Settings → Pull Requests merge methods.
      * null when unknown (token/public payload omitted flags).
      */
-    allowMergeCommit: repoMergeFlags ? repoMergeFlags.allowMergeCommit : null,
-    allowSquashMerge: repoMergeFlags ? repoMergeFlags.allowSquashMerge : null,
-    allowRebaseMerge: repoMergeFlags ? repoMergeFlags.allowRebaseMerge : null,
+    allowMergeCommit: repoMergeFlags
+      ? repoMergeFlags.allowMergeCommit
+      : fastIdentityOnly
+        ? (undefined as any)
+        : null,
+    allowSquashMerge: repoMergeFlags
+      ? repoMergeFlags.allowSquashMerge
+      : fastIdentityOnly
+        ? (undefined as any)
+        : null,
+    allowRebaseMerge: repoMergeFlags
+      ? repoMergeFlags.allowRebaseMerge
+      : fastIdentityOnly
+        ? (undefined as any)
+        : null,
     /**
      * True when REST repo.permissions.admin — enables GitHub-style bypass-rules
      * opt-in on policy-blocked PRs. false/null → no bypass checkbox.
@@ -650,7 +773,9 @@ export async function fetchPrDetail(
         ? true
         : viewerCanMergeAsAdmin === false
           ? false
-          : null,
+          : fastIdentityOnly
+            ? (undefined as any)
+            : null,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
     additions: pr.additions,
