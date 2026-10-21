@@ -512,6 +512,60 @@
     }
   }
 
+  /** GitHub repo-content frame that holds the /pulls list. */
+  const PULLS_LIST_TURBO_FRAME_ID = 'repo-content-turbo-frame';
+
+  /**
+   * Re-request the native /pulls list through Turbo: a hidden same-URL link
+   * targeting the repo-content frame swaps only the list HTML (no history
+   * entry). Turbo scrolls to top on frame visits, so window scroll is put back
+   * once the frame has loaded (retried until the new list is tall enough).
+   */
+  function reloadNativePullsList() {
+    const frame = document.getElementById(PULLS_LIST_TURBO_FRAME_ID);
+    const scrollY = window.scrollY;
+    if (frame && scrollY > 0) {
+      frame.addEventListener(
+        'turbo:frame-load',
+        () => {
+          const deadline = Date.now() + 1500;
+          const restore = () => {
+            window.scrollTo(0, scrollY);
+            if (Math.abs(window.scrollY - scrollY) > 1 && Date.now() < deadline) {
+              requestAnimationFrame(restore);
+            }
+          };
+          restore();
+        },
+        { once: true }
+      );
+    }
+    const link = document.createElement('a');
+    link.href = location.href;
+    link.hidden = true;
+    if (frame) link.setAttribute('data-turbo-frame', frame.id);
+    link.setAttribute('data-turbo-action', 'replace');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  /**
+   * PR shell → /pulls list: always refresh the list (native rows + open-PR
+   * stack) so merges, reviews, and pushes made while the shell was open show.
+   */
+  function refreshPullsListAfterPrShell(owner: any, repo: any) {
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return;
+    try {
+      reloadNativePullsList();
+    } catch {
+      /* ignore */
+    }
+    if (owner && repo) {
+      void ensureOpenPullsForStack(owner, repo, { force: true });
+    }
+  }
+
   function closeModal() {
     abortOpenFetches('sheet-closed');
     const wasEmbed = isEmbedPresentation(current.presentation);
@@ -603,12 +657,14 @@
         }
       }
       // Modal on /pulls → list: re-render that PR row from detail (labels, title, …)
+      // right away, then refetch the whole list from the network.
       if (!wasEmbed) {
         try {
           scheduleListResyncAfterPrShell(listResync);
         } catch {
           /* ignore */
         }
+        refreshPullsListAfterPrShell(listResync.owner, listResync.repo);
       }
     };
     const raf =
