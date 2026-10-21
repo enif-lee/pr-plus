@@ -21,7 +21,6 @@ import * as pageEmbedApi from './lib/page-embed';
 import * as githubPrRouteApi from './lib/github-pr-route';
 import * as avatarImageCacheApi from './lib/avatar-image-cache';
 import * as hljsLazy from './lib/hljs-lazy';
-import * as mermaidLazy from './lib/mermaid-lazy';
 import { configureMarkedCodeHighlight } from './components/common/utils';
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -32,8 +31,6 @@ configureMarkedCodeHighlight(marked);
 (globalThis as any).hljs = hljs;
 (globalThis as any).marked = marked;
 (globalThis as any).DOMPurify = DOMPurify;
-// Mermaid loads on first ```mermaid fence (dist/mermaid.esm.js) — not inlined
-(globalThis as any).PRPMermaidLazy = mermaidLazy;
 (globalThis as any).React = React;
 (globalThis as any).ReactDOM = { createRoot };
 (globalThis as any).PRPHljsLazy = hljsLazy;

@@ -107,6 +107,8 @@ export const MSG = {
   SET_MILESTONE: 'PR_TREE_SET_MILESTONE',
   SET_DRAFT_STAGE: 'PR_TREE_SET_DRAFT_STAGE',
   UPLOAD_REPO_FILE: 'PR_TREE_UPLOAD_REPO_FILE',
+  /** ```mermaid source → SVG (Ondine WASM runs in the SW). */
+  ONDINE_RENDER: 'PR_TREE_ONDINE_RENDER',
 } as const;
 
 export type SwMessageType = (typeof MSG)[keyof typeof MSG];

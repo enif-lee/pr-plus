@@ -1,9 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import {
-  ensureMermaid,
-  initMermaid,
-  resolveMermaidColorMode,
-} from '../../lib/mermaid-lazy';
+import { renderOndine, resolveMermaidColorMode } from '../../lib/ondine-client';
+import { useT } from '../../lib/locale-context';
 import {
   mermaidSourceKey,
   shouldRunMermaidHeavyWork,
@@ -41,13 +38,20 @@ function useShellColorMode(): 'light' | 'dark' {
 }
 
 /**
- * Renders a ```mermaid fence via lazy-loaded Mermaid (dist/mermaid.esm.js).
+ * Ondine SVG reads colors from `--ondine-*` CSS vars (MarkdownComposer.css),
+ * so one render serves both shell themes.
+ */
+const ONDINE_CACHE_THEME = 'ondine';
+
+/**
+ * Renders a ```mermaid fence via Ondine (WASM in the service worker, see
+ * lib/ondine-client).
  *
- * Conversation virtual list: defer ensureMermaid/render while the scroller is
+ * Conversation virtual list: defer renderOndine while the scroller is
  * actively scrolling (ConversationScrollIdleContext). Outside conversation
  * (composer preview, etc.) the context defaults to idle → render immediately.
  * Scroll end does not re-run heavy work when SVG is already cached for the
- * same code+theme (avoids flash / jank).
+ * same code (avoids flash / jank).
  *
  * Module LRU (`mermaid-svg-cache`) survives virtual-list unmount/remount so
  * diagrams that leave and re-enter the viewport reuse SVG without eng.render.
@@ -59,10 +63,12 @@ function useShellColorMode(): 'light' | 'dark' {
 export function MermaidBlock({ code }: { code?: string }) {
   const reactId = useId().replace(/:/g, '');
   const colorMode = useShellColorMode();
-  const mermaidTheme = colorMode === 'dark' ? 'dark' : 'neutral';
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const { isScrolling } = useConversationScrollIdle();
   const sourceTrim = String(code || '').trim();
-  const initialKey = mermaidSourceKey(sourceTrim, mermaidTheme);
+  const initialKey = mermaidSourceKey(sourceTrim, ONDINE_CACHE_THEME);
   const initialHit = sourceTrim ? getMermaidSvgCache(initialKey) : null;
 
   const [err, setErr] = useState<string | null>(null);
@@ -76,7 +82,7 @@ export function MermaidBlock({ code }: { code?: string }) {
   const [svgFull, setSvgFull] = useState(() => initialHit?.svgFull || '');
   const [viewerOpen, setViewerOpen] = useState(false);
   /**
-   * Last successfully rendered code+theme identity.
+   * Last successfully rendered code identity.
    * Component ref covers scroll-while-mounted; module LRU covers remount.
    */
   const cachedKeyRef = useRef<string>(initialHit ? initialKey : '');
@@ -86,7 +92,7 @@ export function MermaidBlock({ code }: { code?: string }) {
   useEffect(() => {
     let cancelled = false;
     const source = String(code || '').trim();
-    const sourceKey = mermaidSourceKey(source, mermaidTheme);
+    const sourceKey = mermaidSourceKey(source, ONDINE_CACHE_THEME);
     if (!source) {
       setBusy(false);
       setSvg('');
@@ -137,70 +143,37 @@ export function MermaidBlock({ code }: { code?: string }) {
       setSvgFull('');
       cachedKeyRef.current = '';
 
-      let eng: any = null;
-      try {
-        eng = await ensureMermaid();
-      } catch (e: any) {
-        if (!cancelled) {
-          setBusy(false);
-          setErr(e?.message || 'Failed to load Mermaid');
-        }
-        return;
-      }
+      const res = await renderOndine(source, {
+        idPrefix: `prp-mmd-${reactId}-${Date.now().toString(36)}-`,
+      });
       if (cancelled) return;
 
-      if (!eng || typeof eng.render !== 'function') {
+      if (res.ok === false) {
         setBusy(false);
-        setErr('Mermaid unavailable');
+        setErr(
+          res.unavailable ? tRef.current('diagram_renderer_unavailable') : res.error
+        );
         return;
       }
 
-      const id = `prp-mmd-${reactId}-${Date.now().toString(36)}`;
-      try {
-        // look: handDrawn; theme: neutral (light) | dark (dark shell)
-        initMermaid(eng, mermaidTheme);
-        const result = await eng.render(id, source);
-        if (cancelled) return;
-        const out = result && typeof result.svg === 'string' ? result.svg : '';
-        if (!out) {
-          setBusy(false);
-          setErr('Mermaid returned empty SVG');
-          return;
-        }
-        // Keep full SVG for fullscreen viewer; fit only the conversation card.
-        const fitted =
-          typeof fitMermaidSvgInline === 'function'
-            ? fitMermaidSvgInline(out, {
-                maxHeight: MERMAID_INLINE_MAX_HEIGHT_PX,
-              })
-            : out;
-        setSvgFull(out);
-        setSvg(fitted);
-        cachedKeyRef.current = sourceKey;
-        setMermaidSvgCache(sourceKey, { svgFitted: fitted, svgFull: out });
-        setBusy(false);
-        setErr(null);
-      } catch (e: any) {
-        if (cancelled) return;
-        setBusy(false);
-        setSvg('');
-        setSvgFull('');
-        cachedKeyRef.current = '';
-        setErr(e?.message || String(e));
-        try {
-          document.getElementById(id)?.remove();
-          document.getElementById(`d${id}`)?.remove();
-        } catch {
-          /* ignore */
-        }
-      }
+      const out = res.svg;
+      // Keep full SVG for fullscreen viewer; fit only the conversation card.
+      const fitted = fitMermaidSvgInline(out, {
+        maxHeight: MERMAID_INLINE_MAX_HEIGHT_PX,
+      });
+      setSvgFull(out);
+      setSvg(fitted);
+      cachedKeyRef.current = sourceKey;
+      setMermaidSvgCache(sourceKey, { svgFitted: fitted, svgFull: out });
+      setBusy(false);
+      setErr(null);
     }
 
     void run();
     return () => {
       cancelled = true;
     };
-  }, [code, reactId, mermaidTheme, isScrolling]);
+  }, [code, reactId, isScrolling]);
 
   if (err) {
     return (

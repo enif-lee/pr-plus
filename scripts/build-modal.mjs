@@ -4,10 +4,12 @@
  * - Entry: src/modal/main.tsx
  * - CSS: collected from TSX/TS `import './x.css'` in the esbuild graph,
  *   then PostCSS (import + Tailwind + autoprefixer + prp scope guard) → dist/pr-modal.css
- * - Mermaid / hljs language packs: separate ESM chunks
+ * - hljs language packs: separate ESM chunks
+ * - Ondine WASM for ```mermaid fences: copied to dist/ondine.wasm (SW-rendered)
  */
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postcss from 'postcss';
@@ -25,8 +27,11 @@ fs.mkdirSync(outDir, { recursive: true });
 const entry = path.join(root, 'src/modal/main.tsx');
 const outfile = path.join(outDir, 'pr-modal.bundle.js');
 const cssOut = path.join(outDir, 'pr-modal.css');
-const mermaidOut = path.join(outDir, 'mermaid.esm.js');
-const mermaidEntry = path.join(root, 'scripts/mermaid-entry.mjs');
+const ondineWasmOut = path.join(outDir, 'ondine.wasm');
+// Size-optimized module with every diagram type (all.fast.wasm is ~2.5x larger)
+const ondineWasmSrc = createRequire(path.join(root, 'package.json')).resolve(
+  'ondine/compiler/wasm/all.wasm'
+);
 const langCatalog = path.join(root, 'src/modal/hljs-languages.json');
 
 // Clean dist (recreate)
@@ -83,7 +88,6 @@ await esbuild.build({
     '@lib': path.join(root, 'src/modal/lib'),
     '@common': path.join(root, 'src/modal/components/common'),
   },
-  external: ['mermaid'],
   define: { 'process.env.NODE_ENV': '"production"' },
   minify: true,
   charset: 'utf8',
@@ -230,39 +234,8 @@ if (builtLangs.length !== langIds.length) {
   );
 }
 
-// --- Lazy Mermaid ESM chunk ---
-await esbuild.build({
-  absWorkingDir: root,
-  entryPoints: [mermaidEntry],
-  bundle: true,
-  outfile: mermaidOut,
-  format: 'esm',
-  platform: 'browser',
-  target: ['chrome110', 'edge110'],
-  minify: true,
-  charset: 'utf8',
-  legalComments: 'none',
-  logLevel: 'warning',
-  mainFields: ['module', 'browser', 'main'],
-  conditions: ['import', 'module', 'browser', 'default'],
-});
-
-if (fs.existsSync(mermaidOut)) {
-  let mText = fs.readFileSync(mermaidOut, 'utf8');
-  if (/[^\x00-\x7F]/.test(mText)) {
-    mText = mText.replace(/[^\x00-\x7F]/g, (ch) => {
-      const cp = ch.codePointAt(0);
-      if (cp > 0xffff) {
-        const sub = cp - 0x10000;
-        const hi = 0xd800 + (sub >> 10);
-        const lo = 0xdc00 + (sub & 0x3ff);
-        return `\\u${hi.toString(16)}\\u${lo.toString(16)}`;
-      }
-      return `\\u${cp.toString(16).padStart(4, '0')}`;
-    });
-    fs.writeFileSync(mermaidOut, mText, 'utf8');
-  }
-}
+// --- Ondine WASM (compiled + run in the service worker, see sw-ondine.ts) ---
+fs.copyFileSync(ondineWasmSrc, ondineWasmOut);
 
 console.log('Built', path.relative(root, outfile), `(${fs.statSync(outfile).size} bytes)`);
 if (fs.existsSync(cssOut)) console.log('Built', path.relative(root, cssOut));
@@ -271,10 +244,8 @@ console.log(
   path.relative(root, langsDir),
   `(${builtLangs.length} language chunks)`
 );
-if (fs.existsSync(mermaidOut)) {
-  console.log(
-    'Built',
-    path.relative(root, mermaidOut),
-    `(${fs.statSync(mermaidOut).size} bytes)`
-  );
-}
+console.log(
+  'Built',
+  path.relative(root, ondineWasmOut),
+  `(${fs.statSync(ondineWasmOut).size} bytes)`
+);

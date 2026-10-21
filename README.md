@@ -134,7 +134,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Description** | Markdown body with write/preview edit |
 | **Timeline** | Reviews, issue comments, review threads with code snippets; dual-window pagination |
-| **Mermaid diagrams** | `` ```mermaid `` `` fences render inline (lazy engine); **handDrawn** look; light **neutral** / shell **dark** theme |
+| **Mermaid diagrams** | `` ```mermaid `` `` fences render inline via [Ondine](https://github.com/wevm/ondine) (lazy Rust/WASM compiler); monochrome, follows shell light / dark theme |
 | **Diagram fullscreen** | **자세히 보기** / double-click → fit-to-stage viewer; **scroll or pinch zoom**, **drag pan**; Esc closes the viewer only |
 | **Syntax highlight** | Fenced code blocks via **lazy highlight.js** language chunks (including Dockerfile and common langs) |
 | **Entity links** | Authors, `@mentions`, labels, `#issue` refs → GitHub URLs |
@@ -248,7 +248,7 @@ After install, open the **pr+** toolbar icon and save a GitHub PAT (see [PAT](#p
 ### Developer mode (local / Load unpacked)
 
 1. Clone this repository.
-2. `npm install && npm run build` (builds the modal bundle, CSS, Mermaid chunk, and hljs language packs under `src/modal/dist/`).
+2. `npm install && npm run build` (builds the modal bundle, CSS, Ondine diagram chunk + WASM, and hljs language packs under `src/modal/dist/`).
 3. Open Chrome or Edge → `chrome://extensions` (or `edge://extensions`).
 4. Enable **Developer mode**.
 5. **Load unpacked** → select this repository root (folder that contains `manifest.json`).
@@ -372,7 +372,7 @@ src/
     components/common/                          # Button, Markdown, TipPopover, …
     lib/ + pure/                                # helpers (rstest pure paths)
     styles/ entry.css + tokens.css              # Tailwind + design tokens
-    dist/                                       # bundle, CSS, mermaid, hljs-langs
+    dist/                                       # bundle, CSS, ondine, hljs-langs
 tests/
   *.rstest.ts                                   # unit + architecture gates
   e2e/                                          # local agent-browser scenarios

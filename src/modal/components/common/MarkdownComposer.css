@@ -538,8 +538,21 @@
   width: auto;
   height: auto;
   display: block;
-  /* Soften any residual color mermaid injects */
-  filter: grayscale(0.15);
+}
+/* Ondine SVG colors come from these vars, so diagrams follow the shell theme. */
+.prp-mermaid-wrap,
+.prp-overlay-viewer--mermaid {
+  --ondine-bg: var(--prp-bg);
+  --ondine-fg: var(--prp-fg);
+  --ondine-muted: var(--prp-fg-muted);
+  --ondine-line: var(--prp-fg-muted);
+  --ondine-border: var(--prp-fg-muted);
+  --ondine-surface: var(--prp-bg-muted);
+  --ondine-accent: var(--prp-accent);
+  --ondine-stroke: 1.5px;
+}
+.prp-mermaid-wrap .prp-mermaid {
+  background: var(--prp-bg);
 }
 /*
  * Loading / scroll-deferred skeleton: same max-height budget, no scroll.

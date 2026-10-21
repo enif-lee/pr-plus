@@ -34,6 +34,9 @@
   "background": {
     "service_worker": "src/background.sw.js"
   },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "action": {
     "default_title": "__MSG_actionTitle__",
     "default_popup": "src/popup.html",
@@ -107,7 +110,6 @@
     {
       "resources": [
         "src/modal/dist/pr-modal.css",
-        "src/modal/dist/mermaid.esm.js",
         "src/modal/dist/hljs-langs/*",
         "src/modal/dist/hljs-langs/*.js"
       ],

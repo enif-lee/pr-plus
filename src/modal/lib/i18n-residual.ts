@@ -198,6 +198,7 @@ export const RESIDUAL_MESSAGE_KEYS = [
   'leave_unsaved_title',
   'leave_unsaved_message',
   'leave_unsaved_confirm',
+  'diagram_renderer_unavailable',
 ] as const;
 
 export const residualEn: MessageCatalog = {
@@ -403,6 +404,7 @@ export const residualEn: MessageCatalog = {
   leave_unsaved_message:
     'You have unsent text in this pull request. Leave anyway?',
   leave_unsaved_confirm: 'Leave',
+  diagram_renderer_unavailable: 'Diagram renderer unavailable',
 };
 
 export const residualKo: MessageCatalog = {
@@ -606,6 +608,7 @@ export const residualKo: MessageCatalog = {
   leave_unsaved_message:
     '이 풀 리퀘스트에 아직 보내지 않은 입력이 있습니다. 그래도 나갈까요?',
   leave_unsaved_confirm: '나가기',
+  diagram_renderer_unavailable: '다이어그램 렌더러를 불러오지 못했습니다',
 };
 
 export const residualJa: MessageCatalog = {
@@ -810,6 +813,7 @@ export const residualJa: MessageCatalog = {
   leave_unsaved_message:
     'このプルリクエストに未送信の入力があります。離れますか？',
   leave_unsaved_confirm: '離れる',
+  diagram_renderer_unavailable: 'ダイアグラムレンダラーを読み込めませんでした',
 };
 
 export const residualZh: MessageCatalog = {
@@ -1006,4 +1010,5 @@ export const residualZh: MessageCatalog = {
   leave_unsaved_title: '不发送并离开？',
   leave_unsaved_message: '此拉取请求中有尚未发送的内容。仍要离开吗？',
   leave_unsaved_confirm: '离开',
+  diagram_renderer_unavailable: '无法加载图表渲染器',
 };
