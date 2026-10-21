@@ -225,11 +225,11 @@ describe('mapGraphqlReviewThreadNodes + merge bulk (shipped pure)', () => {
     ).toEqual(['PRRT_res']);
   });
 
-  test('shell comments(first:1) with totalCount 1 is fully loaded', () => {
+  test('shell comments(first:1) with totalCount 1 is still a preview (no diffHunk)', () => {
     const mapped = mapGraphqlReviewThreadNodes([
       {
         id: 'PRRT_solo',
-        isResolved: true,
+        isResolved: false,
         path: 'c.ts',
         line: 1,
         comments: {
@@ -238,9 +238,37 @@ describe('mapGraphqlReviewThreadNodes + merge bulk (shipped pure)', () => {
         },
       },
     ]);
-    expect(mapped.threads[0].commentsLoaded).toBe(true);
+    expect(mapped.threads[0].commentsLoaded).toBe(false);
     expect(mapped.comments[0].body).toBe('only one');
+    expect(mapped.comments[0]._commentsPreview).toBe(true);
+    // Unresolved solo thread must get by-ids so Conversation has its hunk
+    expect(selectThreadIdsForEagerComments(mapped.threads)).toEqual(['PRRT_solo']);
+  });
+
+  test('single comment with diffHunk (by-ids payload) is fully loaded', () => {
+    const mapped = mapGraphqlReviewThreadNodes([
+      {
+        id: 'PRRT_solo_full',
+        isResolved: false,
+        path: 'c.ts',
+        line: 1,
+        comments: {
+          totalCount: 1,
+          nodes: [
+            {
+              databaseId: 8,
+              body: 'only one',
+              path: 'c.ts',
+              line: 1,
+              diffHunk: '@@ -1 +1 @@\n-a\n+b',
+            },
+          ],
+        },
+      },
+    ]);
+    expect(mapped.threads[0].commentsLoaded).toBe(true);
     expect(mapped.comments[0]._commentsPreview).toBe(false);
+    expect(selectThreadIdsForEagerComments(mapped.threads)).toEqual([]);
   });
 
   test('full by-id nodes → commentsLoaded true + bodies', () => {

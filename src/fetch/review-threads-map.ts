@@ -222,7 +222,12 @@ export function mapReviewThreadNodes(allNodes: any) {
             const nodes = t.comments?.nodes || [];
             const total = t.comments?.totalCount;
             if (!nodes.length) return total === 0;
-            if (typeof total === 'number') return total <= nodes.length;
+            if (typeof total === 'number') {
+              return (
+                total <= nodes.length &&
+                nodes.every((n: any) => n && 'diffHunk' in n)
+              );
+            }
             return true;
           })()
       : false;
