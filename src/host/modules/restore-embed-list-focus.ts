@@ -434,7 +434,9 @@
     const dom = listDomApi();
     if (typeof dom?.findOriginalPrRows === 'function') {
       try {
-        return dom.findOriginalPrRows(document) || [];
+        return (dom.findOriginalPrRows(document) || []).filter(
+          (row: any) => !row?.hidden
+        );
       } catch {
         /* ignore */
       }

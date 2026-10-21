@@ -9,6 +9,7 @@ const PR_TREE_ACTIVE_CLASS = 'pr-tree-active';
 const PR_TREE_DECORATED_CLASS = 'pr-tree-decorated';
 const PR_TREE_META_CLASS = 'pr-tree-row-meta';
 const PR_TREE_META_HOST_CLASS = 'pr-tree-meta-host';
+const PR_TREE_STALE_ROW_CLASS = 'pr-tree-stale-row';
 
 /** GitHub React pulls dashboard (Preview list). Stable testids, not CSS-module hashes. */
 const PR_REACT_TITLE_LINK = 'a[data-testid="listitem-title-link"]';
@@ -676,7 +677,8 @@ function findListRowCommentControl(row: any) {
       }
     }
   }
-  return null;
+  // React list: bare `<div><svg.octicon-comment/> 119</div>`
+  return row.querySelector?.('.octicon-comment')?.parentElement || null;
 }
 
 function findListRowByNumber(doc: any, prNumber: any) {
@@ -736,7 +738,37 @@ function findListRowLabelsHost(row: any) {
   const firstLabel = row.querySelector(
     'a.IssueLabel, span.IssueLabel, a.hx_IssueLabel, [class*="IssueLabel"]'
   );
-  return firstLabel?.parentElement || null;
+  // React list wraps each chip in its own "Filter by label" button
+  const chip = firstLabel?.closest?.('button') || firstLabel;
+  return chip?.parentElement || null;
+}
+
+/** Label names currently painted on a list row, in display order. */
+function readListRowLabelNames(row: any) {
+  const host = findListRowLabelsHost(row);
+  if (!host) return [];
+  const names: string[] = [];
+  for (const el of host.querySelectorAll(
+    'a.IssueLabel, span.IssueLabel, a.hx_IssueLabel, [class*="IssueLabel"]'
+  )) {
+    if (el.parentElement?.closest?.('[class*="IssueLabel"]')) continue;
+    const name = String(el.getAttribute?.('data-name') || el.textContent || '').trim();
+    if (name) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * Hide a row whose PR no longer matches the list filter (merged, closed, …).
+ * The native row stays in the DOM so GitHub's own re-render can replace it.
+ */
+function hideStaleListRow(row: any) {
+  if (!row?.classList) return false;
+  if (row.classList.contains(PR_TREE_STALE_ROW_CLASS)) return false;
+  row.classList.add(PR_TREE_STALE_ROW_CLASS);
+  row.setAttribute('hidden', '');
+  row.setAttribute('aria-hidden', 'true');
+  return true;
 }
 
 /**
@@ -865,7 +897,9 @@ function updateListRowCommentCount(doc: any, prNumber: any, count: any) {
     for (const node of el.childNodes || []) {
       if (node.nodeType !== 3) continue; // TEXT_NODE
       const t = String(node.textContent || '');
-      if (/\d/.test(t)) {
+      const m = t.match(/\d+/);
+      if (m) {
+        if (Number(m[0]) > c) return false;
         node.textContent = t.replace(/\d+/, String(c));
         return true;
       }
@@ -875,6 +909,53 @@ function updateListRowCommentCount(doc: any, prNumber: any, count: any) {
   }
 
   return false;
+}
+
+function patchListRowTitle(row: any, title: any) {
+  if (typeof title !== 'string' || !title.trim()) return false;
+  const anchor = findListRowTitleAnchor(row);
+  if (!anchor) return false;
+  const next = title.trim();
+  if (String(anchor.textContent || '').trim() === next) return false;
+  anchor.textContent = next;
+  return true;
+}
+
+/**
+ * Patch one native row from a pulls-list snapshot PR: title, labels and
+ * comment count. Labels are rebuilt only when the name set differs, so
+ * untouched rows keep GitHub's own filter chips. Draft / branch meta comes
+ * from the open-pulls decorations, not from here.
+ */
+function applyListRowSnapshot(doc: any, row: any, pr: any) {
+  if (!doc || !row || !pr || typeof pr !== 'object') return false;
+  let changed = patchListRowTitle(row, pr.title);
+  if (Array.isArray(pr.labels)) {
+    // GitHub paints chips sorted by name; API order differs
+    const byName = (a: string, b: string) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' });
+    const next = pr.labels
+      .map(normalizeListLabel)
+      .filter(Boolean)
+      .sort((a: any, b: any) => byName(a.name, b.name));
+    const painted = readListRowLabelNames(row).sort(byName);
+    if (
+      next.map((l: any) => l.name).join('\n') !== painted.join('\n') &&
+      applyListRowLabels(doc, row, next)
+    ) {
+      changed = true;
+    }
+  }
+  const count = Number(pr.listCommentCount);
+  if (
+    pr.listCommentCount != null &&
+    Number.isFinite(count) &&
+    count >= 0 &&
+    updateListRowCommentCount(doc, Number(pr.number), count)
+  ) {
+    changed = true;
+  }
+  return changed;
 }
 
 /**
@@ -894,19 +975,7 @@ function applyListRowFromDetail(doc: any, prNumber: any, detail: any) {
   const row = findListRowByNumber(doc, n);
   if (!row) return false;
 
-  let changed = false;
-
-  // Title
-  if (typeof detail.title === 'string' && detail.title.trim()) {
-    const anchor = findListRowTitleAnchor(row);
-    if (anchor) {
-      const next = detail.title.trim();
-      if (String(anchor.textContent || '').trim() !== next) {
-        anchor.textContent = next;
-        changed = true;
-      }
-    }
-  }
+  let changed = patchListRowTitle(row, detail.title);
 
   // Labels (native chips — not covered by applyRowMeta decorations).
   // Only when the key is present (explicit write-through). Missing key = leave
@@ -1089,8 +1158,11 @@ const domApi = {
   findListRowTitleAnchor,
   findListRowCommentControl,
   findListRowLabelsHost,
+  readListRowLabelNames,
+  hideStaleListRow,
   applyListRowLabels,
   updateListRowCommentCount,
+  applyListRowSnapshot,
   applyListRowFromDetail,
   countMissingDecorations,
   refreshReviewBadges,

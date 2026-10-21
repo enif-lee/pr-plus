@@ -2,6 +2,7 @@
  * Fetch feature unit: pulls
  */
 import {
+  apiGraphql,
   buildApiHeaders,
   escapeRegExp,
   githubRestUrl,
@@ -107,6 +108,91 @@ export async function fetchPullByNumber(owner: any, repo: any, pullNumber: any, 
   }
   const data = await res.json();
   return mapApiPullRequest(data);
+}
+
+/** GitHub search API page cap; also bounds the per-row aliases in one query. */
+const PULLS_LIST_SNAPSHOT_MAX = 100;
+
+/**
+ * Turn the /pulls `q` filter into a repo-scoped PR search query. Missing or
+ * blank `q` is GitHub's default list (`is:pr is:open`).
+ */
+export function buildPullsListSearchQuery(owner: any, repo: any, rawQuery: any) {
+  let q = String(rawQuery ?? '').trim() || 'is:pr is:open';
+  if (!/(^|\s)repo:\S/i.test(q)) q = `repo:${owner}/${repo} ${q}`;
+  if (!/(^|\s)(is|type):(pr|pull-request)(\s|$)/i.test(q)) q = `${q} is:pr`;
+  return q;
+}
+
+/**
+ * One GraphQL round trip for an in-place /pulls refresh: which PRs still match
+ * the list filter (search) + current row fields for the PRs on screen.
+ * `searchComplete` is false when the filter matches more PRs than one search
+ * page returns, so a missing number does not prove the row left the list.
+ */
+export async function fetchPullsListSnapshot(owner: any, repo: any, opts: any, fetchImpl: any, token: any = null, ctx: any = null) {
+  ctx = normalizeApiCtx(ctx);
+  const numbers = [
+    ...new Set(
+      (Array.isArray(opts?.numbers) ? opts.numbers : [])
+        .map((n: any) => Number(n))
+        .filter((n: number) => Number.isInteger(n) && n > 0)
+    ),
+  ].slice(0, PULLS_LIST_SNAPSHOT_MAX) as number[];
+  const searchQuery = buildPullsListSearchQuery(owner, repo, opts?.query);
+  const rowFields = numbers
+    .map((n) => `p${n}: pullRequest(number:${n}) { ...ListRowPr }`)
+    .join('\n    ');
+  // Fragment first: apiGraphql injects rateLimit before the document's last `}`
+  const query = `${numbers.length ? `fragment ListRowPr on PullRequest {
+  number title state isDraft totalCommentsCount
+  labels(first:20) { nodes { name color description } }
+}
+` : ''}query PullsListSnapshot($q:String!${numbers.length ? ',$owner:String!,$repo:String!' : ''}) {
+  search(query:$q, type:ISSUE, first:${PULLS_LIST_SNAPSHOT_MAX}) {
+    issueCount
+    nodes { ... on PullRequest { number } }
+  }${numbers.length ? `
+  repository(owner:$owner, name:$repo) {
+    ${rowFields}
+  }` : ''}
+}`;
+  const variables: any = { q: searchQuery };
+  if (numbers.length) {
+    variables.owner = String(owner || '');
+    variables.repo = String(repo || '');
+  }
+  const data = await apiGraphql(query, variables, fetchImpl, token, ctx);
+  const searchNodes = Array.isArray(data?.search?.nodes) ? data.search.nodes : [];
+  const matchedNumbers = searchNodes
+    .map((node: any) => Number(node?.number))
+    .filter((n: number) => Number.isInteger(n) && n > 0);
+  const issueCount = Number(data?.search?.issueCount);
+  const prs = numbers
+    .map((n) => data?.repository?.[`p${n}`])
+    .filter(Boolean)
+    .map((pr: any) => ({
+      number: Number(pr.number),
+      title: String(pr.title || ''),
+      state: String(pr.state || '').toLowerCase() === 'open' ? 'open' : 'closed',
+      merged: String(pr.state || '').toUpperCase() === 'MERGED',
+      draft: Boolean(pr.isDraft),
+      labels: (pr.labels?.nodes || []).filter(Boolean).map((l: any) => ({
+        name: String(l.name || ''),
+        color: String(l.color || ''),
+        description: String(l.description || ''),
+      })),
+      listCommentCount: Number.isFinite(Number(pr.totalCommentsCount))
+        ? Number(pr.totalCommentsCount)
+        : undefined,
+    }));
+  return {
+    searchQuery,
+    searchComplete:
+      Number.isFinite(issueCount) && matchedNumbers.length >= issueCount,
+    matchedNumbers,
+    prs,
+  };
 }
 
 /**

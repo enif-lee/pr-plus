@@ -512,58 +512,83 @@
     }
   }
 
-  /** GitHub repo-content frame that holds the /pulls list. */
-  const PULLS_LIST_TURBO_FRAME_ID = 'repo-content-turbo-frame';
+  let pullsListRefreshAbort: AbortController | null = null;
 
   /**
-   * Re-request the native /pulls list through Turbo: a hidden same-URL link
-   * targeting the repo-content frame swaps only the list HTML (no history
-   * entry). Turbo scrolls to top on frame visits, so window scroll is put back
-   * once the frame has loaded (retried until the new list is tall enough).
+   * Refresh the visible /pulls rows in place (no page or frame reload): one
+   * GraphQL query with the list's own `q` filter. Rows still in the filter get
+   * title / labels / comment count patched; rows that left it (merged, closed,
+   * no longer matching) are hidden. PRs new to the filter have no native row,
+   * so they only appear on the next real navigation.
    */
-  function reloadNativePullsList() {
-    const frame = document.getElementById(PULLS_LIST_TURBO_FRAME_ID);
-    const scrollY = window.scrollY;
-    if (frame && scrollY > 0) {
-      frame.addEventListener(
-        'turbo:frame-load',
-        () => {
-          const deadline = Date.now() + 1500;
-          const restore = () => {
-            window.scrollTo(0, scrollY);
-            if (Math.abs(window.scrollY - scrollY) > 1 && Date.now() < deadline) {
-              requestAnimationFrame(restore);
-            }
-          };
-          restore();
-        },
-        { once: true }
-      );
+  async function refreshPullsListRowsInPlace(owner: any, repo: any) {
+    const fetchApi = (globalThis as any).PRTreeFetch;
+    const dom = listDomApi();
+    if (
+      typeof fetchApi?.fetchPullsListSnapshot !== 'function' ||
+      typeof dom?.applyListRowSnapshot !== 'function'
+    ) {
+      return;
     }
-    const link = document.createElement('a');
-    link.href = location.href;
-    link.hidden = true;
-    if (frame) link.setAttribute('data-turbo-frame', frame.id);
-    link.setAttribute('data-turbo-action', 'replace');
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  }
+    const rowByNumber = new Map<number, any>();
+    for (const row of getPullsListRows()) {
+      const n = Number(dom.getPrNumberFromRow(row));
+      if (Number.isInteger(n) && n > 0) rowByNumber.set(n, row);
+    }
+    if (!rowByNumber.size) return;
 
-  /**
-   * PR shell → /pulls list: always refresh the list (native rows + open-PR
-   * stack) so merges, reviews, and pushes made while the shell was open show.
-   */
-  function refreshPullsListAfterPrShell(owner: any, repo: any) {
-    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return;
     try {
-      reloadNativePullsList();
+      pullsListRefreshAbort?.abort();
     } catch {
       /* ignore */
     }
-    if (owner && repo) {
-      void ensureOpenPullsForStack(owner, repo, { force: true });
+    const ac = new AbortController();
+    pullsListRefreshAbort = ac;
+    const pageUrl = location.href;
+    let snapshot: any;
+    try {
+      snapshot = await fetchApi.fetchPullsListSnapshot(owner, repo, {
+        query: new URLSearchParams(location.search).get('q'),
+        numbers: [...rowByNumber.keys()],
+        signal: ac.signal,
+      });
+    } catch {
+      return;
+    } finally {
+      if (pullsListRefreshAbort === ac) pullsListRefreshAbort = null;
     }
+    if (ac.signal.aborted || location.href !== pageUrl || !snapshot) return;
+
+    const matched = new Set<number>(snapshot.matchedNumbers || []);
+    // Search page truncated: fall back to state for the default open list
+    const openOnly = /(^|\s)(is|state):open(\s|$)/i.test(
+      String(snapshot.searchQuery || '')
+    );
+    for (const pr of snapshot.prs || []) {
+      const row = rowByNumber.get(Number(pr?.number));
+      if (!row?.isConnected) continue;
+      const leftList = snapshot.searchComplete
+        ? !matched.has(Number(pr.number))
+        : openOnly && pr.state !== 'open';
+      try {
+        if (leftList) dom.hideStaleListRow(row);
+        else dom.applyListRowSnapshot(document, row, pr);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * PR shell → /pulls list: always refresh the list (visible rows in place +
+   * open-PR stack) so merges, reviews, and pushes made while the shell was
+   * open show without reloading the list.
+   */
+  function refreshPullsListAfterPrShell(owner: any, repo: any) {
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return;
+    if (!owner || !repo) return;
+    void refreshPullsListRowsInPlace(owner, repo);
+    void ensureOpenPullsForStack(owner, repo, { force: true });
   }
 
   function closeModal() {
