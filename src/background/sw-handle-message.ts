@@ -17,6 +17,7 @@ import {
   EXTERNAL_MESSAGE_TYPES,
 } from './sw-open-pr';
 import { handleDetailCacheMessage } from './sw-detail-cache';
+import { handleOndineMessage } from './sw-ondine';
 import {
   isAbortError,
   withServiceWorkerKeepAlive,
@@ -36,10 +37,13 @@ export async function handleMessage(
   if (
     message.type !== MSG.PING &&
     message.type !== MSG.CANCEL_FETCH &&
-    message.type !== MSG.DETAIL_CACHE_CLEAR
+    message.type !== MSG.DETAIL_CACHE_CLEAR &&
+    message.type !== MSG.ONDINE_RENDER
   ) {
     await bindGithubWebHost(message);
   }
+  const diagram = await handleOndineMessage(message);
+  if (diagram !== undefined) return diagram;
   const pageApi = await handlePageApiMessage(message, sender);
   if (pageApi !== undefined) return pageApi;
   const cache = await handleDetailCacheMessage(message);

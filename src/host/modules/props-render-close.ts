@@ -512,6 +512,85 @@
     }
   }
 
+  let pullsListRefreshAbort: AbortController | null = null;
+
+  /**
+   * Refresh the visible /pulls rows in place (no page or frame reload): one
+   * GraphQL query with the list's own `q` filter. Rows still in the filter get
+   * title / labels / comment count patched; rows that left it (merged, closed,
+   * no longer matching) are hidden. PRs new to the filter have no native row,
+   * so they only appear on the next real navigation.
+   */
+  async function refreshPullsListRowsInPlace(owner: any, repo: any) {
+    const fetchApi = (globalThis as any).PRTreeFetch;
+    const dom = listDomApi();
+    if (
+      typeof fetchApi?.fetchPullsListSnapshot !== 'function' ||
+      typeof dom?.applyListRowSnapshot !== 'function'
+    ) {
+      return;
+    }
+    const rowByNumber = new Map<number, any>();
+    for (const row of getPullsListRows()) {
+      const n = Number(dom.getPrNumberFromRow(row));
+      if (Number.isInteger(n) && n > 0) rowByNumber.set(n, row);
+    }
+    if (!rowByNumber.size) return;
+
+    try {
+      pullsListRefreshAbort?.abort();
+    } catch {
+      /* ignore */
+    }
+    const ac = new AbortController();
+    pullsListRefreshAbort = ac;
+    const pageUrl = location.href;
+    let snapshot: any;
+    try {
+      snapshot = await fetchApi.fetchPullsListSnapshot(owner, repo, {
+        query: new URLSearchParams(location.search).get('q'),
+        numbers: [...rowByNumber.keys()],
+        signal: ac.signal,
+      });
+    } catch {
+      return;
+    } finally {
+      if (pullsListRefreshAbort === ac) pullsListRefreshAbort = null;
+    }
+    if (ac.signal.aborted || location.href !== pageUrl || !snapshot) return;
+
+    const matched = new Set<number>(snapshot.matchedNumbers || []);
+    // Search page truncated: fall back to state for the default open list
+    const openOnly = /(^|\s)(is|state):open(\s|$)/i.test(
+      String(snapshot.searchQuery || '')
+    );
+    for (const pr of snapshot.prs || []) {
+      const row = rowByNumber.get(Number(pr?.number));
+      if (!row?.isConnected) continue;
+      const leftList = snapshot.searchComplete
+        ? !matched.has(Number(pr.number))
+        : openOnly && pr.state !== 'open';
+      try {
+        if (leftList) dom.hideStaleListRow(row);
+        else dom.applyListRowSnapshot(document, row, pr);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * PR shell → /pulls list: always refresh the list (visible rows in place +
+   * open-PR stack) so merges, reviews, and pushes made while the shell was
+   * open show without reloading the list.
+   */
+  function refreshPullsListAfterPrShell(owner: any, repo: any) {
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return;
+    if (!owner || !repo) return;
+    void refreshPullsListRowsInPlace(owner, repo);
+    void ensureOpenPullsForStack(owner, repo, { force: true });
+  }
+
   function closeModal() {
     abortOpenFetches('sheet-closed');
     const wasEmbed = isEmbedPresentation(current.presentation);
@@ -603,12 +682,14 @@
         }
       }
       // Modal on /pulls → list: re-render that PR row from detail (labels, title, …)
+      // right away, then refetch the whole list from the network.
       if (!wasEmbed) {
         try {
           scheduleListResyncAfterPrShell(listResync);
         } catch {
           /* ignore */
         }
+        refreshPullsListAfterPrShell(listResync.owner, listResync.repo);
       }
     };
     const raf =

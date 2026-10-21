@@ -66,7 +66,35 @@ export function buildNestedFileTree(files: any) {
   }
 
   sortNodes(root.children || []);
-  return root.children || [];
+  return compactSingleChildDirs(root.children || []);
+}
+
+/**
+ * Fold dir chains whose only child is another dir into one node
+ * (`io` → `acme` → `dev` becomes `io/acme/dev`). The folded node keeps the
+ * deepest dir's `path`, so expand/collapse keys stay stable. Runs after
+ * sorting so sibling order is unchanged.
+ */
+export function compactSingleChildDirs(nodes: any): any[] {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.map((node: any) => {
+    if (!node || node.type !== 'dir') return node;
+    let name = node.name;
+    let cur = node;
+    while (
+      Array.isArray(cur.children) &&
+      cur.children.length === 1 &&
+      cur.children[0]?.type === 'dir'
+    ) {
+      cur = cur.children[0];
+      name = `${name}/${cur.name}`;
+    }
+    return {
+      ...cur,
+      name,
+      children: compactSingleChildDirs(cur.children),
+    };
+  });
 }
 
 /**

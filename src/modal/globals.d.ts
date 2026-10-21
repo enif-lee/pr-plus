@@ -11,11 +11,6 @@ declare const marked:
 
 declare const DOMPurify: { sanitize: (html: string) => string };
 
-declare const mermaid: {
-  initialize: (cfg: object) => void;
-  render: (id: string, code: string) => Promise<{ svg: string }>;
-};
-
 interface Window {
   mountPrModal?: (el: HTMLElement, props: unknown) => unknown;
   PRModalApp?: unknown;

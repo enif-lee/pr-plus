@@ -538,8 +538,28 @@
   width: auto;
   height: auto;
   display: block;
-  /* Soften any residual color mermaid injects */
-  filter: grayscale(0.15);
+}
+/* Ondine SVG colors come from these vars, so diagrams follow the shell theme.
+   Ondine sizes boxes for monospace widths; a proportional font only adds slack. */
+.prp-mermaid-wrap,
+.prp-overlay-viewer--mermaid {
+  --ondine-font: var(--prp-font);
+  --ondine-bg: var(--prp-bg);
+  --ondine-fg: var(--prp-fg);
+  --ondine-muted: var(--prp-fg-muted);
+  --ondine-line: var(--prp-fg-muted);
+  --ondine-border: var(--prp-fg-muted);
+  --ondine-surface: var(--prp-bg-muted);
+  --ondine-accent: var(--prp-accent);
+  --ondine-stroke: 1.5px;
+}
+/* Pie legend labels are centered on monospace widths; proportional text goes ragged */
+.prp-mermaid-wrap svg.ondine-pie,
+.prp-overlay-viewer--mermaid svg.ondine-pie {
+  --ondine-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.prp-mermaid-wrap .prp-mermaid {
+  background: var(--prp-bg);
 }
 /*
  * Loading / scroll-deferred skeleton: same max-height budget, no scroll.

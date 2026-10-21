@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { IconX } from './icons';
-import { resolveMermaidColorMode } from '../../lib/mermaid-lazy';
+import { resolveMermaidColorMode } from '../../lib/ondine-client';
 import { useModalStore } from '../../store/modal-store';
 import {
   registerEscapeOverlay,

@@ -424,6 +424,7 @@ function FolderFileTreeImpl(props: any) {
                   <button
                     type="button"
                     className="prp-filetree__item prp-filetree__dir"
+                    title={`${node.path}/`}
                     onClick={() => onToggleDir?.(node.path)}
                   >
                     <span className="prp-filetree__chev" aria-hidden="true">

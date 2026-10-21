@@ -143,19 +143,19 @@ describe('wiring: Conversation scroller → Mermaid gate', () => {
     expect(vcl).toMatch(/setIsScrolling\(false\)/);
   });
 
-  test('MermaidBlock gates ensureMermaid via shouldRunMermaidHeavyWork + cache key', () => {
+  test('MermaidBlock gates renderOndine via shouldRunMermaidHeavyWork + cache key', () => {
     const mmd = read('src/modal/components/common/MermaidBlock.tsx');
     expect(mmd).toMatch(/shouldRunMermaidHeavyWork/);
     expect(mmd).toMatch(/useConversationScrollIdle/);
     expect(mmd).toMatch(/cachedKeyRef/);
-    expect(mmd).toMatch(/ensureMermaid/);
+    expect(mmd).toMatch(/renderOndine/);
     // Module LRU survives virtual-list remount
     expect(mmd).toMatch(/getMermaidSvgCache/);
     expect(mmd).toMatch(/setMermaidSvgCache/);
     // Heavy path only when runHeavy is true
     expect(mmd).toMatch(/if\s*\(\s*!runHeavy\s*\)/);
     const gateIdx = mmd.indexOf('if (!runHeavy)');
-    const ensureIdx = mmd.indexOf('await ensureMermaid()');
+    const ensureIdx = mmd.indexOf('await renderOndine(');
     expect(gateIdx).toBeGreaterThan(-1);
     expect(ensureIdx).toBeGreaterThan(gateIdx);
   });

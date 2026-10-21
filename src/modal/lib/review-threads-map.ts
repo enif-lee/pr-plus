@@ -67,11 +67,17 @@ export function mapGraphqlReviewThreads(nodes: any) {
     }));
 }
 
+function isFullReviewCommentNode(node: any): boolean {
+  return Boolean(node) && typeof node === 'object' && 'diffHunk' in node;
+}
+
 /**
  * Whether a GraphQL `comments` connection is a complete load for the thread.
  * Shell uses `comments(first:1){ totalCount nodes {…} }` as a root preview —
  * when totalCount > nodes.length, replies are still deferred (commentsLoaded:false).
- * Full by-id payloads omit totalCount or return all nodes → loaded.
+ * The preview never selects `diffHunk`, so even a single-comment thread is not
+ * loaded from it (Conversation needs the hunk for code context).
+ * Full by-id payloads select `diffHunk` and return all nodes → loaded.
  *
  * @param {any} commentsConn
  * @returns {boolean}
@@ -83,7 +89,9 @@ export function graphqlCommentsAreFullyLoaded(commentsConn: any): boolean {
   const total =
     typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : null;
   if (nodes.length === 0) return total === 0;
-  if (total != null) return total <= nodes.length;
+  if (total != null) {
+    return total <= nodes.length && nodes.every(isFullReviewCommentNode);
+  }
   // No totalCount → treat as full (by-ids / legacy fixtures).
   return true;
 }

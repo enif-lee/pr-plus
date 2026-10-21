@@ -428,6 +428,29 @@ export function measureMermaidSvgSize(
 }
 
 /**
+ * Drop whole declarations from an inline style by property name. Matching
+ * per declaration keeps `stroke-width` / `--x-width` intact when removing
+ * `width`.
+ */
+export function stripStyleDeclarations(
+  style: string,
+  drop: (prop: string, value: string) => boolean
+): string {
+  return String(style || '')
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter((decl) => {
+      if (!decl) return false;
+      const i = decl.indexOf(':');
+      if (i <= 0) return true;
+      const prop = decl.slice(0, i).trim().toLowerCase();
+      const value = decl.slice(i + 1).trim().toLowerCase();
+      return !drop(prop, value);
+    })
+    .join(';');
+}
+
+/**
  * Prepare Mermaid SVG for the fullscreen viewer at **full viewBox resolution**.
  *
  * Inline conversation uses {@link fitMermaidSvgInline}, which shrinks width/height
@@ -447,14 +470,13 @@ export function prepareMermaidSvgForViewer(svgHtml: string): string {
   s = s.replace(/(<svg\b[^>]*?)\sheight="100%"/gi, '$1');
   // Clean style max-width / max-height / width:100% on root svg
   s = s.replace(/(<svg\b[^>]*?)\sstyle="([^"]*)"/i, (_m, tag: string, style: string) => {
-    const cleaned = String(style)
-      .replace(/max-width\s*:\s*[^;]+;?/gi, '')
-      .replace(/max-height\s*:\s*[^;]+;?/gi, '')
-      .replace(/width\s*:\s*100%\s*;?/gi, '')
-      .replace(/height\s*:\s*100%\s*;?/gi, '')
-      .replace(/;;+/g, ';')
-      .trim()
-      .replace(/^;|;$/g, '');
+    const cleaned = stripStyleDeclarations(
+      style,
+      (prop, value) =>
+        prop === 'max-width' ||
+        prop === 'max-height' ||
+        ((prop === 'width' || prop === 'height') && value === '100%')
+    );
     return cleaned ? `${tag} style="${cleaned}"` : tag;
   });
 
@@ -580,14 +602,9 @@ export function fitMermaidSvgInline(
   }
   // Strip style width/height that would fight the fitted attrs
   next = next.replace(/\sstyle="([^"]*)"/i, (_m, style: string) => {
-    const cleaned = String(style)
-      .replace(/max-width\s*:\s*[^;]+;?/gi, '')
-      .replace(/max-height\s*:\s*[^;]+;?/gi, '')
-      .replace(/width\s*:\s*[^;]+;?/gi, '')
-      .replace(/height\s*:\s*[^;]+;?/gi, '')
-      .replace(/;;+/g, ';')
-      .trim()
-      .replace(/^;|;$/g, '');
+    const cleaned = stripStyleDeclarations(style, (prop) =>
+      /^(max-)?(width|height)$/.test(prop)
+    );
     return cleaned ? ` style="${cleaned}"` : '';
   });
   next = next.replace(

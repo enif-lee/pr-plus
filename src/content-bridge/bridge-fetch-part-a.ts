@@ -51,6 +51,30 @@ export const prTreeFetchPartA = {
     }
     return res.prs || [];
   },
+  async fetchPullsListSnapshot(owner: any, repo: any, opts: any = {}) {
+    const res = await send(
+      {
+        type: MSG.FETCH_PULLS_LIST_SNAPSHOT,
+        owner,
+        repo,
+        query: opts.query ?? null,
+        numbers: opts.numbers || [],
+      },
+      { signal: opts.signal || null }
+    );
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      const err = new Error(res?.error || 'Failed to fetch pulls list snapshot');
+      err.status = res?.status;
+      throw err;
+    }
+    return {
+      searchQuery: res.searchQuery || '',
+      searchComplete: Boolean(res.searchComplete),
+      matchedNumbers: res.matchedNumbers || [],
+      prs: res.prs || [],
+    };
+  },
   /**
    * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, fastIdentityOnly?: boolean, retryMilestone?: boolean, coalesceKey?: string }} [opts]
    */

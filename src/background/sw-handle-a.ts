@@ -287,6 +287,29 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
         endTrackedFetch(tracked.requestId);
       }
     }
+    case MSG.FETCH_PULLS_LIST_SNAPSHOT: {
+      const tracked = beginTrackedFetch(message.requestId);
+      try {
+        const token = await tokenForMessage(message);
+        const snapshot = await PRTreeFetch.fetchPullsListSnapshot(
+          message.owner,
+          message.repo,
+          {
+            query: message.query,
+            numbers: Array.isArray(message.numbers) ? message.numbers : [],
+          },
+          tracked.fetch,
+          token,
+          apiCtx
+        );
+        return { ok: true, ...snapshot };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
     case MSG.CANCEL_FETCH: {
       const ids = Array.isArray(message.requestIds)
         ? message.requestIds

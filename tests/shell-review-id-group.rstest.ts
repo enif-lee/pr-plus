@@ -89,7 +89,8 @@ describe('shell includes pullRequestReview (cost-safe first-paint group)', () =>
     ]);
     expect(mapped.comments).toHaveLength(3);
     expect(mapped.comments.every((c: any) => c.reviewId === 99)).toBe(true);
-    expect(mapped.comments.every((c: any) => c._commentsPreview === false)).toBe(
+    // Shell preview (no diffHunk) stays a preview even for solo threads
+    expect(mapped.comments.every((c: any) => c._commentsPreview === true)).toBe(
       true
     );
 
