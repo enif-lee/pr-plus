@@ -109,6 +109,7 @@ export function AsideFilesTree({
                   <button
                     type="button"
                     className="prp-aside-tree__item prp-aside-tree__dir"
+                    title={`${node.path}/`}
                     onClick={() =>
                       setExpandedDirs((prev) => {
                         const n = new Set(prev);
