@@ -103,6 +103,7 @@ import {
   MODAL_MIN_HEIGHT,
   MODAL_MAX_HEIGHT,
   clampSheetWidth,
+  conversationMaxWidth,
   clampModalSize,
   nextSheetWidthFromDrag,
   nextModalSizeFromDrag,
@@ -110,6 +111,8 @@ import {
   saveSheetWidth,
   loadModalSize,
   saveModalSize,
+  loadShellFullscreen,
+  saveShellFullscreen,
   resolveShellSizeStorage,
   toggleShellFullscreen,
   shellFullscreenClassName,
@@ -493,6 +496,7 @@ export function PrModalApp({
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
   const timelineVisibility = prefs?.timelineVisibility ?? null;
+  const conversationWidthLimit = conversationMaxWidth(prefs?.conversationWidth);
   /**
    * Plugin language: `auto` follows GitHub page locale; concrete codes override.
    * Passed to chrome that uses pure catalogs (Diff settings labels, …).
@@ -1048,8 +1052,14 @@ export function PrModalApp({
       return { width: MODAL_DEFAULT_WIDTH, height: MODAL_DEFAULT_HEIGHT };
     }
   });
-  /** Fullscreen shell — session-only; does not wipe stored sizes. */
-  const [shellFullscreen, setShellFullscreen] = useState(false);
+  /** Restore fullscreen separately so leaving it still restores the windowed size. */
+  const [shellFullscreen, setShellFullscreen] = useState(() =>
+    loadShellFullscreen(resolveShellSizeStorage(typeof window === 'undefined' ? null : window))
+  );
+  useEffect(() => {
+    if (isEmbed || typeof window === 'undefined') return;
+    saveShellFullscreen(resolveShellSizeStorage(window), shellFullscreen);
+  }, [isEmbed, shellFullscreen]);
   /** Blue dimmer while resizing into the ~50px fullscreen snap zone (not yet committed). */
   const [shellFullscreenHint, setShellFullscreenHint] = useState(false);
   /** True while the user is dragging a shell resizer (disables size CSS transition). */
@@ -2580,7 +2590,7 @@ export function PrModalApp({
     const fromFs = Boolean(shellFullscreen);
     const startWidth = clampSheetWidth(
       fromFs ? viewportWidth : sheetWidth,
-      { viewportWidth }
+      { viewportWidth: Math.min(viewportWidth ?? Infinity, conversationWidthLimit) }
     );
     if (fromFs) {
       setShellFullscreen(false);
@@ -2588,7 +2598,9 @@ export function PrModalApp({
       setShellFullscreenHint(true);
     }
     // Persistable width to keep if we re-enter fullscreen on release
-    const widthBeforeGesture = clampSheetWidth(sheetWidth, { viewportWidth });
+    const widthBeforeGesture = clampSheetWidth(sheetWidth, {
+      viewportWidth: Math.min(viewportWidth ?? Infinity, conversationWidthLimit),
+    });
     shellResizeDragRef.current = { kind: 'sheet', startX, startWidth };
     setShellResizing(true);
     const target = e.currentTarget as HTMLElement;
@@ -2618,24 +2630,26 @@ export function PrModalApp({
       const vw = typeof window !== 'undefined' ? window.innerWidth : viewportWidth;
       // During drag only resize — fullscreen waits until pointerup (handle release).
       const nextW = nextSheetWidthFromDrag(drag.startWidth, drag.startX, ev.clientX, {
-        viewportWidth: vw,
+        viewportWidth: Math.min(vw, conversationWidthLimit),
       });
       setSheetWidth(nextW);
       setShellFullscreenHint(
         typeof sheetWidthHitsFullscreen === 'function' &&
-          sheetWidthHitsFullscreen(nextW, vw, SHELL_FULLSCREEN_EDGE_PX)
+          sheetWidthHitsFullscreen(nextW, Math.min(vw, conversationWidthLimit), SHELL_FULLSCREEN_EDGE_PX)
       );
     };
     const onUp = (ev: PointerEvent) => {
       endDrag(ev);
       setSheetWidth((prev) => {
         const vw = typeof window !== 'undefined' ? window.innerWidth : undefined;
-        const next = clampSheetWidth(prev, { viewportWidth: vw });
+        const next = clampSheetWidth(prev, {
+          viewportWidth: Math.min(vw ?? Infinity, conversationWidthLimit),
+        });
         // Promote to fullscreen only when the handle is released in the snap zone.
         // Keep a usable windowed width for the next exit (pre-gesture, not full vw).
         if (
           typeof sheetWidthHitsFullscreen === 'function' &&
-          sheetWidthHitsFullscreen(next, vw, SHELL_FULLSCREEN_EDGE_PX)
+          sheetWidthHitsFullscreen(next, Math.min(vw, conversationWidthLimit), SHELL_FULLSCREEN_EDGE_PX)
         ) {
           setShellFullscreen(true);
           const keep = fromFs ? widthBeforeGesture : startWidth;
@@ -2665,10 +2679,10 @@ export function PrModalApp({
       fromFs
         ? { width: viewportWidth, height: viewportHeight }
         : modalSize,
-      { viewportWidth, viewportHeight }
+      { viewportWidth: Math.min(viewportWidth ?? Infinity, conversationWidthLimit), viewportHeight }
     );
     const sizeBeforeGesture = clampModalSize(modalSize, {
-      viewportWidth,
+      viewportWidth: Math.min(viewportWidth ?? Infinity, conversationWidthLimit),
       viewportHeight,
     });
     if (fromFs) {
@@ -2710,14 +2724,14 @@ export function PrModalApp({
         ev.clientX - drag.startX,
         ev.clientY - drag.startY,
         {
-          viewportWidth: vw,
+          viewportWidth: Math.min(vw, conversationWidthLimit),
           viewportHeight: vh,
         }
       );
       setModalSize(next);
       setShellFullscreenHint(
         typeof modalSizeHitsFullscreen === 'function' &&
-          modalSizeHitsFullscreen(next, vw, vh, SHELL_FULLSCREEN_EDGE_PX)
+          modalSizeHitsFullscreen(next, Math.min(vw, conversationWidthLimit), vh, SHELL_FULLSCREEN_EDGE_PX)
       );
     };
     const onUp = (ev: PointerEvent) => {
@@ -2726,13 +2740,13 @@ export function PrModalApp({
         const vw = typeof window !== 'undefined' ? window.innerWidth : undefined;
         const vh = typeof window !== 'undefined' ? window.innerHeight : undefined;
         const next = clampModalSize(prev, {
-          viewportWidth: vw,
+          viewportWidth: Math.min(vw ?? Infinity, conversationWidthLimit),
           viewportHeight: vh,
         });
         // Release in snap zone → fullscreen; keep a windowed size for next exit.
         if (
           typeof modalSizeHitsFullscreen === 'function' &&
-          modalSizeHitsFullscreen(next, vw, vh, SHELL_FULLSCREEN_EDGE_PX)
+          modalSizeHitsFullscreen(next, Math.min(vw, conversationWidthLimit), vh, SHELL_FULLSCREEN_EDGE_PX)
         ) {
           setShellFullscreen(true);
           const keep = fromFs ? sizeBeforeGesture : start;
@@ -2766,8 +2780,7 @@ export function PrModalApp({
           viewportHeight: window.innerHeight,
         })
       );
-      // Fullscreen is session-only; reset on each open for a predictable shell.
-      setShellFullscreen(false);
+      setShellFullscreen(loadShellFullscreen(sizeStore));
       setShellFullscreenHint(false);
     } catch {
       /* ignore */
@@ -4296,9 +4309,12 @@ export function PrModalApp({
       !isEmbed && shellFullscreenHint ? ' prp-shell--fs-hint' : ''
     } ${animClass} ${theme.className}`.trim();
   const { viewportWidth: vwNow, viewportHeight: vhNow } = viewportSize();
-  const appliedSheetWidth = clampSheetWidth(sheetWidth, { viewportWidth: vwNow });
+  const shellViewportWidth = layoutMode === LAYOUT_DIFF
+    ? vwNow
+    : Math.min(vwNow ?? Infinity, conversationWidthLimit);
+  const appliedSheetWidth = clampSheetWidth(sheetWidth, { viewportWidth: shellViewportWidth });
   const appliedModalSize = clampModalSize(modalSize, {
-    viewportWidth: vwNow,
+    viewportWidth: shellViewportWidth,
     viewportHeight: vhNow,
   });
   // Keep handles in fullscreen so users can drag back to a windowed shell.
@@ -4393,6 +4409,10 @@ export function PrModalApp({
       data-prp-phase9="1"
       data-prp-app-locale={appLocale}
       data-prp-ui-language={uiLanguagePref}
+      style={{
+        '--prp-conversation-max-width': Number.isFinite(conversationWidthLimit)
+          ? `${conversationWidthLimit}px` : '100vw',
+      } as React.CSSProperties}
     >
       <OptHintsOverlayClass targetRef={overlayRef} />
       {!isEmbed ? (
@@ -4418,7 +4438,7 @@ export function PrModalApp({
           showModalResizer={showModalResizer}
           appliedSheetWidth={appliedSheetWidth}
           appliedModalSize={appliedModalSize}
-          vwNow={vwNow}
+          vwNow={shellViewportWidth}
           vhNow={vhNow}
           onSheetResizeStart={onSheetResizeStart}
           onModalResizeStart={onModalResizeStart}

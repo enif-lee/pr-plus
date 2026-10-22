@@ -1,0 +1,64 @@
+/* GitHub conversation diff: old/new gutters and diff colors, no selection wash. */
+.prp-diff-snippet {
+  margin: 8px 0 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--prp-bg);
+  color: var(--prp-fg);
+  overflow: auto;
+  font-family: var(--prp-mono);
+  font-size: 12px;
+  line-height: 20px;
+  tab-size: 4;
+}
+.prp-diff-snippet--scroll { max-height: 30em; }
+.prp-diff-snippet__block {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+.prp-diff-snippet__num {
+  width: 1%;
+  min-width: 50px;
+  padding: 0 10px;
+  text-align: right;
+  vertical-align: top;
+  color: var(--prp-fg-muted);
+  user-select: none;
+}
+.prp-diff-snippet__body {
+  padding: 0 10px;
+  white-space: pre;
+  vertical-align: top;
+}
+.prp-diff-snippet__code {
+  padding: 0;
+  background: transparent;
+  font: inherit;
+}
+.prp-diff-snippet__mark { display: inline-block; width: 12px; }
+.prp-diff-snippet__line--add {
+  background: var(--diffBlob-additionLine-bgColor, var(--prp-add-bg));
+}
+.prp-diff-snippet__line--del {
+  background: var(--diffBlob-deletionLine-bgColor, var(--prp-del-bg));
+}
+.prp-diff-snippet__line--add > .prp-diff-snippet__num {
+  background: var(--diffBlob-additionNum-bgColor, var(--prp-add-bg));
+  color: var(--diffBlob-additionNum-fgColor, var(--prp-fg));
+}
+.prp-diff-snippet__line--del > .prp-diff-snippet__num {
+  background: var(--diffBlob-deletionNum-bgColor, var(--prp-del-bg));
+  color: var(--diffBlob-deletionNum-fgColor, var(--prp-fg));
+}
+.prp-diff-snippet__line--hunk {
+  background: var(--diffBlob-hunkLine-bgColor, var(--prp-hunk-bg));
+  color: var(--diffBlob-hunkLine-fgColor, var(--prp-fg-muted));
+}
+.prp-diff-snippet__line--hunk > .prp-diff-snippet__num {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  background: var(--diffBlob-hunkNum-bgColor-rest, var(--prp-hunk-bg));
+}
+.prp-diff-snippet__line--hunk > .prp-diff-snippet__body { padding: 4px 10px 4px 22px; }

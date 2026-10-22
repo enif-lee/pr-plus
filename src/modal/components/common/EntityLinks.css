@@ -21,6 +21,15 @@ a.prp-label:hover {
   filter: brightness(0.97);
 }
 
+.prp-stack-strip-band {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  border-bottom: 1px solid var(--prp-border-muted);
+  background: var(--prp-bg-muted);
+  box-sizing: border-box;
+}
+
 /*
  * Stack strip host: must be width-constrained so the inner row can overflow-x.
  * (Flex column children default min-width:auto → grow to chip content → no scroll.)
@@ -36,8 +45,6 @@ a.prp-label:hover {
   min-height: 0;
   /* Always clip — do not lift overflow on opt-hold (bar height must stay stable) */
   overflow: hidden !important;
-  border-bottom: 1px solid var(--prp-border-muted);
-  background: var(--prp-bg-muted);
   box-sizing: border-box;
 }
 .prp-stack-strip-host .prp-float-sb--horizontal {

@@ -63,6 +63,7 @@ const DEFAULT_PREFS = {
    * none | small (1× default) | medium (2×) | large (3×)
    */
   shortcutMonitorSize: 'small',
+  conversationWidth: 'normal',
   /**
    * Diff file nav (tree click / ⌥⇧[ ]): auto-expand the target file.
    * Off by default — collapsed files stay collapsed until the user expands.
@@ -249,6 +250,8 @@ function normalizePrefs(raw: any) {
         ? src.onboardingCompleted
         : DEFAULT_PREFS.onboardingCompleted,
     uiLanguage: normalizeUiLanguagePref(src.uiLanguage),
+    conversationWidth: ['narrow', 'normal', 'wide', 'full'].includes(src.conversationWidth)
+      ? src.conversationWidth : 'normal',
     timelineVisibility: normalizeTimelineVisibilityPref(
       src.timelineVisibility ?? DEFAULT_PREFS.timelineVisibility
     ),

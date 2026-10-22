@@ -71,8 +71,10 @@ export function buildThreadEntry(c: any, children: any, snippetFn: any, files: a
           path: c.path,
           line: c.line,
           originalLine: c.originalLine ?? c.original_line,
+          originalStartLine: c.originalStartLine ?? c.original_start_line,
           startLine: c.startLine ?? c.start_line,
           side: c.side,
+          subjectType: c.subjectType,
           diffHunk: c.diffHunk || c.diff_hunk || '',
         },
         files

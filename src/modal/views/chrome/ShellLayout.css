@@ -339,6 +339,38 @@
   transform-origin: right center;
 }
 
+/* Conversation profiles cap the whole shell, including title and sidebar.
+ * Keep this after fullscreen rules and override embed's uncapped !important. */
+.prp-overlay[data-layout='conversation'] > .prp-modal {
+  max-width: min(100%, var(--prp-conversation-max-width, 1160px)) !important;
+  box-sizing: border-box;
+}
+.prp-overlay[data-presentation='embed'][data-layout='conversation'] > .prp-modal {
+  margin-inline: auto;
+  /* Header paint may cross the capped shell; the outer overlay clips at the page edge. */
+  overflow: visible;
+}
+.prp-overlay[data-presentation='embed'][data-layout='conversation'] > .prp-modal > :is(.prp-header, .prp-detail-gnb, .prp-stack-strip-band) {
+  position: relative;
+  isolation: isolate;
+}
+.prp-overlay[data-presentation='embed'][data-layout='conversation'] > .prp-modal > .prp-header {
+  z-index: var(--prp-z-chrome, 20);
+}
+.prp-overlay[data-presentation='embed'][data-layout='conversation'] > .prp-modal > :is(.prp-header, .prp-detail-gnb, .prp-stack-strip-band)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  background: inherit;
+  border-bottom: inherit;
+  pointer-events: none;
+  z-index: -1;
+}
+
 @keyframes prp-sheet-in {
   from {
     opacity: 0.96;

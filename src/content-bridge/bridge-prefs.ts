@@ -19,6 +19,7 @@ export const DEFAULT_PREFS = {
   treeView: true,
   pluginEnabled: true,
   shortcutMonitorSize: 'small',
+  conversationWidth: 'normal',
   autoExpandOnFileNav: false,
   onboardingCompleted: false,
   /** auto | en | ko | ja | zh_CN — custom overrides GitHub page detect */
@@ -164,6 +165,8 @@ export function normalizePrefsLocal(raw: any) {
         ? src.onboardingCompleted
         : DEFAULT_PREFS.onboardingCompleted,
     uiLanguage: normalizeUiLanguageLocal(src.uiLanguage),
+    conversationWidth: ['narrow', 'normal', 'wide', 'full'].includes(src.conversationWidth)
+      ? src.conversationWidth : 'normal',
     timelineVisibility: normalizeTimelineVisibilityLocal(
       src.timelineVisibility ?? DEFAULT_PREFS.timelineVisibility
     ),

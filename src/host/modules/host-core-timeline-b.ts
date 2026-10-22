@@ -331,6 +331,7 @@
             next.shortcutMonitorSize
           ),
           uiLanguage: normalizeUiLanguage(next.uiLanguage),
+          conversationWidth: next.conversationWidth ?? 'normal',
           timelineVisibility: normalizeTimelineVisibilityLocal(
             next.timelineVisibility
           ),
@@ -496,6 +497,7 @@
               next?.shortcutMonitorSize
             ),
             uiLanguage: normalizeUiLanguage(next?.uiLanguage),
+            conversationWidth: next?.conversationWidth ?? 'normal',
             timelineVisibility: normalizeTimelineVisibilityLocal(
               next?.timelineVisibility
             ),

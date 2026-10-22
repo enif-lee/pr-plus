@@ -220,6 +220,7 @@
     singleFileMode: false,
     autoExpandOnFileNav: false,
     shortcutMonitorSize: 'small',
+    conversationWidth: 'normal',
     /** auto | en | ko | ja | zh_CN — custom overrides GitHub page detect */
     uiLanguage: 'auto',
     timelineVisibility: { ...DEFAULT_TIMELINE_VISIBILITY },

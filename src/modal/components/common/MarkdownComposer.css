@@ -255,37 +255,6 @@
   min-height: 64px;
 }
 
-.prp-diff-snippet {
-  margin: 8px 0 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--prp-border-muted);
-  background: var(--prp-bg-muted);
-  font-family: var(--prp-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  overflow: auto;
-  max-height: 180px;
-  white-space: pre;
-}
-
-.prp-diff-snippet__line--add {
-  background: var(--prp-add-bg);
-}
-
-.prp-diff-snippet__line--del {
-  background: var(--prp-del-bg);
-}
-
-.prp-diff-snippet__line--hunk {
-  color: var(--prp-accent);
-}
-
-.prp-diff-snippet__line--hit {
-  outline: 1px solid color-mix(in srgb, var(--prp-accent) 50%, transparent);
-  background: color-mix(in srgb, var(--prp-accent) 12%, transparent);
-}
-
 /* Review-thread nested replies use .prp-review-thread only (not issue conversation) */
 
 .prp-selection-bar__meta {

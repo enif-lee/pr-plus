@@ -58,6 +58,12 @@ export const POPUP_MESSAGE_KEYS = [
   'popup_label_list_open',
   'popup_opt_list_open_modal',
   'popup_opt_list_open_page',
+  'popup_pref_conversation_width_title',
+  'popup_pref_conversation_width_desc',
+  'popup_opt_conversation_width_narrow',
+  'popup_opt_conversation_width_normal',
+  'popup_opt_conversation_width_wide',
+  'popup_opt_conversation_width_full',
   'popup_pref_reverse_title',
   'popup_pref_reverse_desc',
   'popup_pref_timeline_title',
@@ -123,6 +129,12 @@ export const POPUP_MESSAGE_KEYS = [
 ] as const;
 
 export const popupEn: MessageCatalog = {
+  popup_pref_conversation_width_title: 'Conversation maximum width',
+  popup_pref_conversation_width_desc: 'Limit the entire Conversation width, including the title and sidebar.',
+  popup_opt_conversation_width_narrow: 'Narrow',
+  popup_opt_conversation_width_normal: 'Normal',
+  popup_opt_conversation_width_wide: 'Wide',
+  popup_opt_conversation_width_full: 'Maximum',
   popup_title: 'pr+',
   popup_section_default_pat: 'Default PAT',
   popup_section_ghe_pat: 'GitHub Enterprise PAT',
@@ -259,6 +271,12 @@ export const popupEn: MessageCatalog = {
 };
 
 export const popupKo: MessageCatalog = {
+  popup_pref_conversation_width_title: 'Conversation 최대 너비',
+  popup_pref_conversation_width_desc: '타이틀과 사이드 패널을 포함한 Conversation 전체의 최대 너비를 제한합니다.',
+  popup_opt_conversation_width_narrow: '좁음',
+  popup_opt_conversation_width_normal: '보통',
+  popup_opt_conversation_width_wide: '넓음',
+  popup_opt_conversation_width_full: '최대',
   popup_title: 'pr+',
   popup_section_default_pat: '기본 PAT',
   popup_section_ghe_pat: 'GitHub Enterprise PAT',
@@ -395,6 +413,12 @@ export const popupKo: MessageCatalog = {
 };
 
 export const popupJa: MessageCatalog = {
+  popup_pref_conversation_width_title: 'Conversation の最大幅',
+  popup_pref_conversation_width_desc: 'タイトルとサイドパネルを含む Conversation 全体の最大幅を制限します。',
+  popup_opt_conversation_width_narrow: '狭い',
+  popup_opt_conversation_width_normal: '標準',
+  popup_opt_conversation_width_wide: '広い',
+  popup_opt_conversation_width_full: '最大',
   popup_title: 'pr+',
   popup_section_default_pat: 'デフォルト PAT',
   popup_section_ghe_pat: 'GitHub Enterprise PAT',
@@ -531,6 +555,12 @@ export const popupJa: MessageCatalog = {
 };
 
 export const popupZh: MessageCatalog = {
+  popup_pref_conversation_width_title: '对话最大宽度',
+  popup_pref_conversation_width_desc: '限制整个对话的最大宽度，包括标题和侧边栏。',
+  popup_opt_conversation_width_narrow: '窄',
+  popup_opt_conversation_width_normal: '标准',
+  popup_opt_conversation_width_wide: '宽',
+  popup_opt_conversation_width_full: '最大',
   popup_title: 'pr+',
   popup_section_default_pat: '默认 PAT',
   popup_section_ghe_pat: 'GitHub Enterprise PAT',

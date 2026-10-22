@@ -587,6 +587,21 @@
         </select>
       </span>
     </div>
+    <div class="pref pref--action" style="cursor: default">
+      <span class="pref__body">
+        <label for="pref-conversation-width" class="pref__title" data-i18n="popup_pref_conversation_width_title">Conversation maximum width</label>
+        <span class="pref__desc" data-i18n="popup_pref_conversation_width_desc">Limit the entire Conversation width, including the title and sidebar.</span>
+        <select
+          id="pref-conversation-width"
+          style="margin-top: 8px; width: 100%; max-width: 100%; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; background: #fff"
+        >
+          <option value="narrow" data-i18n="popup_opt_conversation_width_narrow">Narrow</option>
+          <option value="normal" selected data-i18n="popup_opt_conversation_width_normal">Normal</option>
+          <option value="wide" data-i18n="popup_opt_conversation_width_wide">Wide</option>
+          <option value="full" data-i18n="popup_opt_conversation_width_full">Maximum</option>
+        </select>
+      </span>
+    </div>
     <label class="pref" for="pref-reverse-comments">
       <input id="pref-reverse-comments" type="checkbox" />
       <span class="pref__body">

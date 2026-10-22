@@ -31,6 +31,9 @@ const prefShortcutMonitorSize = document.getElementById(
 const prefUiLanguage = document.getElementById(
   'pref-ui-language'
 ) as HTMLSelectElement | null;
+const prefConversationWidth = document.getElementById(
+  'pref-conversation-width'
+) as HTMLSelectElement | null;
 const rateLimitBarsEl = document.getElementById('rate-limit-bars');
 const rateLimitStatusEl = document.getElementById('rate-limit-status');
 const restartOnboardingBtn = document.getElementById('restart-onboarding');
@@ -65,6 +68,7 @@ const DEFAULT_PREFS = {
   autoExpandOnFileNav: false,
   treeView: true,
   shortcutMonitorSize: 'small',
+  conversationWidth: 'normal',
   uiLanguage: 'auto',
   onboardingCompleted: false,
   timelineVisibility: {
@@ -74,6 +78,10 @@ const DEFAULT_PREFS = {
     'review-threads': true,
   },
 };
+
+function normalizeConversationWidth(raw: unknown): string {
+  return ['narrow', 'normal', 'wide', 'full'].includes(String(raw)) ? String(raw) : 'normal';
+}
 
 function normalizeListOpenMode(raw: unknown): 'modal' | 'page' {
   const v = String(raw ?? '')
@@ -263,6 +271,7 @@ function applyPopupI18n(preferred: string | null | undefined) {
       ? normalizeUiLanguage(preferred)
       : normalizeUiLanguage(prefUiLanguage?.value);
   const prevMonitor = prefShortcutMonitorSize?.value;
+  const prevConversationWidth = prefConversationWidth?.value;
 
   popupLocale = resolvePopupLocale(pref);
   t = createTranslator(popupLocale);
@@ -306,6 +315,9 @@ function applyPopupI18n(preferred: string | null | undefined) {
   if (prefShortcutMonitorSize && prevMonitor) {
     prefShortcutMonitorSize.value = normalizeShortcutMonitorSize(prevMonitor);
   }
+  if (prefConversationWidth) {
+    prefConversationWidth.value = normalizeConversationWidth(prevConversationWidth);
+  }
 }
 
 /** @type {{ host: string, mask: string }[]} */
@@ -332,6 +344,9 @@ function renderTokenStatus(status: any) {
 
 function renderPrefs(prefs: any) {
   const p = prefs || DEFAULT_PREFS;
+  if (prefConversationWidth) {
+    prefConversationWidth.value = normalizeConversationWidth(p.conversationWidth);
+  }
   if (prefPluginEnabled) {
     prefPluginEnabled.checked = p.pluginEnabled !== false;
   }
@@ -671,6 +686,7 @@ function readLocalExtensionPrefs(): Promise<any> {
             raw.shortcutMonitorSize
           ),
           uiLanguage: normalizeUiLanguage(raw.uiLanguage),
+          conversationWidth: normalizeConversationWidth(raw.conversationWidth),
           timelineVisibility: normalizeTimelineVisibilityPopup(
             raw.timelineVisibility
           ),
@@ -785,6 +801,7 @@ async function savePrefs() {
       treeView: Boolean(prefTreeView?.checked),
       shortcutMonitorSize,
       uiLanguage,
+      conversationWidth: normalizeConversationWidth(prefConversationWidth?.value),
       timelineVisibility: readTimelineVisibilityFromDom(),
     };
     // Storage.local is authoritative. Do NOT call PREFS_SET afterward —
@@ -858,6 +875,7 @@ prefSingleFileMode?.addEventListener('change', () => void savePrefs());
 prefAutoExpandFileNav?.addEventListener('change', () => void savePrefs());
 prefTreeView?.addEventListener('change', () => void savePrefs());
 prefShortcutMonitorSize?.addEventListener('change', () => void savePrefs());
+prefConversationWidth?.addEventListener('change', () => void savePrefs());
 prefUiLanguage?.addEventListener('change', () => {
   // Capture before label rewrite — Chrome may reset select to first option (auto).
   const chosen = normalizeUiLanguage(prefUiLanguage.value);

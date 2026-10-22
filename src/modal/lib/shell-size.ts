@@ -33,11 +33,20 @@ export const MODAL_DEFAULT_HEIGHT = 800;
 
 export const SHELL_SHEET_WIDTH_KEY = 'prp:shell-sheet-width';
 export const SHELL_MODAL_SIZE_KEY = 'prp:shell-modal-size';
+export const SHELL_FULLSCREEN_KEY = 'prp:shell-fullscreen';
 
 export type ModalShellSize = {
   width: number;
   height: number;
 };
+
+/** Conversation width includes the title, main content and metadata sidebar. */
+export function conversationMaxWidth(profile: unknown): number {
+  if (profile === 'full') return Infinity;
+  if (profile === 'narrow') return 920;
+  if (profile === 'wide') return 1400;
+  return 1160;
+}
 
 export type ShellSizePref = {
   sheetWidth: number;
@@ -364,6 +373,29 @@ export function saveModalSize(
   if (!storage || typeof storage.setItem !== 'function') return false;
   try {
     storage.setItem(SHELL_MODAL_SIZE_KEY, serializeModalSize(size));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadShellFullscreen(
+  storage: { getItem?: (k: string) => string | null } | null | undefined
+): boolean {
+  try {
+    return storage?.getItem?.(SHELL_FULLSCREEN_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveShellFullscreen(
+  storage: { setItem?: (k: string, v: string) => void } | null | undefined,
+  fullscreen: boolean
+): boolean {
+  if (!storage?.setItem) return false;
+  try {
+    storage.setItem(SHELL_FULLSCREEN_KEY, String(fullscreen));
     return true;
   } catch {
     return false;

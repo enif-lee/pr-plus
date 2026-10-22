@@ -209,6 +209,7 @@ export function StackStrip({
   if (!show) return null;
 
   return (
+    <div className="prp-stack-strip-band">
     <div className="prp-scroll-float-host prp-stack-strip-host">
       <div
         ref={stripScrollRef}
@@ -321,6 +322,7 @@ export function StackStrip({
         anchorKey={`${openKey || ''}:${anchorEl ? '1' : '0'}:${selectOptions.length}`}
         placement="bottom"
       />
+    </div>
     </div>
   );
 }

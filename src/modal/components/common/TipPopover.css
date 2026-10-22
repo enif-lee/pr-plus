@@ -971,49 +971,6 @@ a.prp-branch-tag__text:focus-visible {
   display: inline-block;
   margin-top: 0;
 }
-/* ── Conversation snippet: continuous yellow (no line borders), scroll only if long ── */
-.prp-diff-snippet {
-  margin: 8px 0 10px;
-  padding: 0;
-  border-radius: 8px;
-  border: 0;
-  background: transparent;
-  font-family: var(--prp-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  overflow: visible;
-  max-height: none;
-  white-space: pre;
-}
-.prp-diff-snippet--scroll {
-  max-height: 30em;
-  overflow: auto;
-  border-radius: 8px;
-}
-.prp-diff-snippet__block {
-  display: block;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--prp-sel-bg, color-mix(in srgb, #eac54f 22%, transparent));
-  box-shadow: inset 0 0 0 1px var(--prp-sel-border, color-mix(in srgb, #eac54f 45%, transparent));
-}
-.prp-diff-snippet__line {
-  padding: 0 10px;
-  border: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
-}
-.prp-diff-snippet__line--add {
-  background: color-mix(in srgb, var(--prp-add-bg) 70%, transparent) !important;
-}
-.prp-diff-snippet__line--del {
-  background: color-mix(in srgb, var(--prp-del-bg) 70%, transparent) !important;
-}
-.prp-diff-snippet__line--hit {
-  background: color-mix(in srgb, #eac54f 35%, transparent) !important;
-  outline: none;
-}
-
 /* ── Selection island (docked under selected lines) ── */
 .prp-diff-pane {
   position: relative;
