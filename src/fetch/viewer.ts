@@ -458,6 +458,15 @@ export async function fetchViewerLogin(fetchImpl: any, token: any, ctx: any = nu
   }
 }
 
+/** Stable account identity for plugin-level own-author comparisons. */
+export async function fetchViewerIdentity(fetchImpl: any, token: any, ctx: any = null) {
+  if (!token) return null;
+  try {
+    const me = await apiJson(githubRestUrl('/user', normalizeApiCtx(ctx)), fetchImpl, token);
+    return me?.id && me?.login ? { id: me.id, login: me.login } : null;
+  } catch { return null; }
+}
+
 /**
  * Map GitHub file list (+ optional gitattributes) to modal file rows with collapse hints.
  * @param {Array} files raw API file objects

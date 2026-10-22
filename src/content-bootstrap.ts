@@ -33,7 +33,7 @@ function createPrTreeApp(deps: any) {
   } = PRTreeDOM;
 
   const { buildPrTree } = PRTree;
-  const { fetchOpenPulls, fetchDanglingPulls, findDanglingPrNumbers } = PRTreeFetch;
+  const { fetchOpenPulls, fetchDanglingPulls, findDanglingPrNumbers, fetchPullsListExtras } = PRTreeFetch;
   // Content context: watchGithubToken is signal-only (never receives the secret).
   const { watchGithubToken, getExtensionPrefs, setExtensionPrefs, watchExtensionPrefs } =
     PRTreeStorage || {};
@@ -55,12 +55,27 @@ function createPrTreeApp(deps: any) {
   let lastLocationHref: any = null;
   let suppressObserverUntil = 0;
   let fillingDangling = false;
+  let extrasGeneration = 0;
+  let extrasKey = '';
+  let extrasTimer: any = null;
+  let extrasAbort: AbortController | null = null;
+  let dataGeneration = 0;
+
+  function cancelListExtras() {
+    extrasGeneration += 1;
+    extrasKey = '';
+    window.clearTimeout(extrasTimer);
+    extrasAbort?.abort();
+    extrasAbort = null;
+  }
 
   function repoKey(owner: any, repo: any) {
     return `${owner}/${repo}`;
   }
 
   function clearCache() {
+    dataGeneration += 1;
+    cancelListExtras();
     cachedForest = null;
     cachedPrs = null;
     cachedRepoKey = null;
@@ -131,6 +146,8 @@ function createPrTreeApp(deps: any) {
    */
   function replaceCachedPrs(prs: any, opts: any = {}) {
     if (!Array.isArray(prs)) return false;
+    dataGeneration += 1;
+    cancelListExtras();
     const o = String(opts?.owner || '').trim();
     const r = String(opts?.repo || '').trim();
     if (o && r) {
@@ -155,6 +172,7 @@ function createPrTreeApp(deps: any) {
       } catch {
         /* ignore */
       }
+      scheduleListExtras();
     }
     return true;
   }
@@ -175,6 +193,62 @@ function createPrTreeApp(deps: any) {
       repoInfo,
       key: repoKey(repoInfo.owner, repoInfo.repo),
     };
+  }
+
+  function scheduleListExtras() {
+    const ctx = currentPullsContext();
+    if (!ctx || ctx.key !== cachedRepoKey || !cachedPrs?.length || typeof fetchPullsListExtras !== 'function') return;
+    const numbers = collectPagePrNumbers(document);
+    if (!numbers.length) return;
+    const signature = pageSignature(numbers);
+    const key = `${ctx.key}:${ctx.path}:${signature}`;
+    if (key === extrasKey) return;
+    cancelListExtras();
+    extrasKey = key;
+    const generation = extrasGeneration;
+    // Yield after the essential REST tree is committed; optional requests cannot
+    // delay bootstrap or cause a second reorder of focused/selected rows.
+    extrasTimer = window.setTimeout(async () => {
+      const visible = new Set(numbers);
+      const source = new Map<number, any>(cachedPrs
+        .filter((pr: any) => visible.has(pr.number)).map((pr: any) => [pr.number, pr]));
+      const controller = new window.AbortController();
+      extrasAbort = controller;
+      try {
+        const patches = await fetchPullsListExtras(ctx.repoInfo.owner, ctx.repoInfo.repo,
+          [...source.values()], { signal: controller.signal });
+        const live = currentPullsContext();
+        if (generation !== extrasGeneration || controller.signal.aborted ||
+          !live || live.key !== ctx.key || live.path !== ctx.path || cachedRepoKey !== ctx.key ||
+          pageSignature(collectPagePrNumbers(document)) !== signature) return;
+        const byNumber = new Map<number, any>((patches || []).map((pr: any) => [pr.number, pr]));
+        cachedPrs = cachedPrs.map((pr: any) => {
+          const before = source.get(pr.number);
+          const patch = byNumber.get(pr.number);
+          if (!before || !patch) return pr;
+          const next = { ...pr };
+          const checksChanged = ['listChecksState', 'listChecksPassed', 'listChecksTotal']
+            .some((key) => pr[key] !== before[key]);
+          for (const field of ['viewerDidAuthor', 'additions', 'deletions', 'changedFiles',
+            'listChecksState', 'listChecksPassed', 'listChecksTotal', 'magicLinks']) {
+            // Keep newer acknowledgements from modal edits/list refreshes.
+            if (pr[field] !== before[field] || !Object.prototype.hasOwnProperty.call(patch, field)) continue;
+            if (field.startsWith('listChecks') && checksChanged) continue;
+            if (field === 'magicLinks' && ['title', 'body', 'baseRef', 'headRef']
+              .some((key) => pr[key] !== before[key])) continue;
+            next[field] = patch[field];
+          }
+          return next;
+        });
+        cachedForest = buildPrTree(cachedPrs);
+        suppressObserverUntil = Date.now() + 400;
+        refreshReviewBadges(document, cachedPrs);
+      } catch {
+        // Optional metadata failure leaves the REST tree usable.
+      } finally {
+        if (extrasAbort === controller) extrasAbort = null;
+      }
+    }, 0);
   }
 
   function clearReapplyTimers() {
@@ -205,8 +279,6 @@ function createPrTreeApp(deps: any) {
     if (!cachedPrs || cachedPrs.length === 0) return 0;
     suppressObserverUntil = Date.now() + 400;
     const n = applyListDecorations(document, cachedPrs);
-    // Review decisions often arrive via batch-deferred-content after paint.
-    refreshReviewBadges(document, cachedPrs);
     return n;
   }
 
@@ -360,6 +432,7 @@ function createPrTreeApp(deps: any) {
     if (!ctx) return false;
 
     fillingDangling = true;
+    const generation = dataGeneration;
     try {
       // Token stays in the service worker; content only receives PR metadata.
       const extras = await fetchDanglingPulls(
@@ -368,6 +441,8 @@ function createPrTreeApp(deps: any) {
         dangling,
         fetchImpl
       );
+      const live = currentPullsContext();
+      if (generation !== dataGeneration || !live || live.key !== ctx.key || live.path !== ctx.path) return false;
       if (extras.length === 0) return false;
       cachedPrs = mergePrs(cachedPrs, extras);
       cachedForest = buildPrTree(cachedPrs);
@@ -378,17 +453,23 @@ function createPrTreeApp(deps: any) {
   }
 
   async function loadPrData(repoInfo: any, pagePrNumbers: any) {
+    const generation = dataGeneration;
     // API auth is applied in the background service worker only.
-    cachedPrs = await fetchOpenPulls(repoInfo.owner, repoInfo.repo, fetchImpl, {
+    const prs = await fetchOpenPulls(repoInfo.owner, repoInfo.repo, fetchImpl, {
       pagePrNumbers,
+      includeAutolinks: false,
     });
+    if (generation !== dataGeneration) return false;
+    cachedPrs = prs;
     cachedForest = buildPrTree(cachedPrs);
     cachedRepoKey = repoKey(repoInfo.owner, repoInfo.repo);
+    return true;
   }
 
   async function handlePageChange() {
     const ctx = currentPullsContext();
     if (!ctx) {
+      cancelListExtras();
       active = false;
       return;
     }
@@ -437,6 +518,7 @@ function createPrTreeApp(deps: any) {
     }
 
     ensureToggle();
+    scheduleListExtras();
 
     // Description node can be replaced after the pr+ meta row already exists.
     // countMissingDecorations stays 0 in that case, so hide again here.
@@ -502,10 +584,15 @@ function createPrTreeApp(deps: any) {
       }
 
       if (cachedRepoKey !== key || !cachedForest) {
-        await loadPrData(repoInfo, pagePrNumbers);
+        if (!await loadPrData(repoInfo, pagePrNumbers)) return { ok: false, reason: 'stale-data' };
       } else {
         // Same repo cache: still fill any page-only PRs.
         await fillDanglingForPage(pagePrNumbers);
+      }
+
+      const live = currentPullsContext();
+      if (!live || live.key !== key || live.path !== path) {
+        return { ok: false, reason: 'stale-page' };
       }
 
       if (!cachedPrs || (cachedForest.length === 0 && cachedPrs.length === 0)) {
@@ -524,6 +611,7 @@ function createPrTreeApp(deps: any) {
 
       lastSyncedPath = path;
       lastPageSignature = pageSignature(pagePrNumbers);
+      scheduleListExtras();
 
       // Notify modal host that stack list is ready (refresh restore can open modal)
       try {
@@ -640,6 +728,7 @@ function createPrTreeApp(deps: any) {
     return {
       observer,
       disconnect() {
+        cancelListExtras();
         observer.disconnect();
         unpatchHistory();
         window.clearInterval(hrefPoll);

@@ -1419,6 +1419,9 @@ li:has(a[data-testid='listitem-title-link']):is(.pr-tree-indented, [data-pr-tree
   box-sizing: border-box;
   margin-left: calc(var(--pr-tree-depth, 0) * 24px) !important;
   padding-left: calc(8px + max(0, var(--pr-tree-depth, 0) - 1) * 4px);
+  /* Reordering/indent is one layout change, not an animated native-row transition. */
+  transition: none !important;
+  overflow-anchor: none;
 }
 
 /* React pulls dashboard rows are display:grid + width 100%; shrink so indent is visible. */
@@ -1688,3 +1691,10 @@ html .pr-tree-row-meta .pr-tree-author.pr-tree-author-self {
 .pr-tree-checks-pending { color: var(--fgColor-attention, #9a6700); }
 :root .pr-tree-row-meta .pr-tree-checks { gap: 2px; }
 .pr-tree-checks svg { flex: 0 0 12px; }
+
+.pr-tree-author .pr-tree-author-me {
+  font-size: 0.9em;
+  font-weight: 400;
+  color: inherit;
+  opacity: 0.8;
+}

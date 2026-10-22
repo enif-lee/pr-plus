@@ -176,9 +176,10 @@ describe('React pulls dashboard list rows', () => {
       additions: 0, deletions: 12, changedFiles: 2, listChecksState: 'SUCCESS',
       listChecksPassed: 3, listChecksTotal: 4 };
     api.applyRowMeta(doc, row, pr);
-    expect(row.querySelector('.pr-tree-author-self')?.textContent).toBe('alice (me)');
-    expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
-    expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+    expect(row.querySelector('.pr-tree-author-self')?.textContent).toBe('alice(me)');
+    expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice(me)');
+    expect(row.querySelector('.pr-tree-author-me')?.parentElement).toBe(row.querySelector('.pr-tree-author'));
+    expect(row.querySelector('.pr-tree-author-me')?.textContent).toBe('(me)');
     expect(row.querySelector('.pr-tree-badge-self')).toBeNull();
     expect(row.querySelector('.pr-tree-change-stats')?.textContent).toBe('+0−12');
     expect(row.querySelector('.pr-tree-row-meta .pr-tree-change-stats')).not.toBeNull();
@@ -231,6 +232,29 @@ describe('React pulls dashboard list rows', () => {
     expect(row.querySelector('.pr-tree-badge-branch')?.textContent).toBe(`${baseRef} ← ${headRef}`);
   });
 
+  test('badge updates preserve connected author and relative-time nodes and live time text', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    const pr = { number: 7, author: 'alice', viewerDidAuthor: true, baseRef: 'main', headRef: 'feature' };
+    api.applyListDecorations(doc, [pr]);
+    const row = api.findListRowByNumber(doc, 7);
+    const author = row.querySelector('.pr-tree-author');
+    const time = row.querySelector('.pr-tree-relative-time');
+    time.textContent = 'live relative time';
+    author.focus();
+    const observer = new doc.defaultView!.MutationObserver(() => {});
+    observer.observe(row.querySelector('.pr-tree-row-meta'), { childList: true, subtree: true });
+    api.refreshReviewBadges(doc, [{ ...pr, additions: 1500, deletions: 3,
+      listChecksState: 'SUCCESS', listChecksPassed: 3, listChecksTotal: 3 }]);
+    expect(row.querySelector('.pr-tree-author')).toBe(author);
+    expect(row.querySelector('.pr-tree-relative-time')).toBe(time);
+    expect(time.textContent).toBe('live relative time');
+    expect(doc.activeElement).toBe(author);
+    const removed = observer.takeRecords().flatMap(record => [...record.removedNodes]);
+    expect(removed.some(node => node === author || node.contains(author) || node === time || node.contains(time))).toBe(false);
+    observer.disconnect();
+  });
+
   test('unchanged deferred refresh preserves metadata nodes and reports no updates', () => {
     const api = loadDomApi();
     const doc = new JSDOM(reactPullsHtml()).window.document;
@@ -262,11 +286,13 @@ describe('React pulls dashboard list rows', () => {
     try {
       expect((await app.bootstrap()).ok).toBe(true);
       const row = domApi.findListRowByNumber(page.window.document, 7);
-      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
-      expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice(me)');
+      expect(row.querySelector('.pr-tree-author-me')?.parentElement).toBe(row.querySelector('.pr-tree-author'));
+      expect(row.querySelector('.pr-tree-author-me')?.textContent).toBe('(me)');
       onPrefs({ uiLanguage: 'ko' });
-      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
-      expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice(me)');
+      expect(row.querySelector('.pr-tree-author-me')?.parentElement).toBe(row.querySelector('.pr-tree-author'));
+      expect(row.querySelector('.pr-tree-author-me')?.textContent).toBe('(me)');
       expect(row.querySelector('.pr-tree-badge-self')).toBeNull();
       expect(row.querySelector('.pr-tree-checks')?.getAttribute('aria-label')).toBe('검사 통과');
       expect(row.querySelector('.pr-tree-change-stats')?.textContent).toBe('+3−1');

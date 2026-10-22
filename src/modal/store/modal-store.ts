@@ -17,6 +17,7 @@ import type {
 } from '../types';
 import { createEmptyPendingReview } from '../lib/pending-review';
 import { LAYOUT_CENTERED, LAYOUT_DIFF } from '../lib/layout-mode';
+import { loadDiffGlobalPrefs, saveDiffGlobalPrefs, resolveDiffGlobalPrefsStorage } from '../lib/diff-global-prefs';
 
 export interface ModalUiState {
   layoutMode: LayoutMode;
@@ -155,7 +156,9 @@ function syncActionBusyDom(busy: boolean, key: string | null) {
 
 export const useModalStore = create<ModalUiState>((set, get) => ({
   layoutMode: LAYOUT_CENTERED as LayoutMode,
-  diffMode: 'unified',
+  diffMode: loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(
+    typeof window === 'undefined' ? null : window
+  )).diffMode,
   scrollTop: 0,
   viewportHeight: 520,
   searchOpen: false,
@@ -202,7 +205,12 @@ export const useModalStore = create<ModalUiState>((set, get) => ({
           : (LAYOUT_DIFF as LayoutMode),
       animClass: '',
     })),
-  setDiffMode: (m) => set({ diffMode: m, scrollTop: 0 }),
+  setDiffMode: (m) => {
+    set({ diffMode: m, scrollTop: 0 });
+    saveDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(
+      typeof window === 'undefined' ? null : window
+    ), { diffMode: m });
+  },
   setScrollTop: (n) => set({ scrollTop: n }),
   setViewportHeight: (n) => set({ viewportHeight: n }),
   setSearchOpen: (v) => set({ searchOpen: v }),

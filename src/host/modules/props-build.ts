@@ -129,6 +129,7 @@
       shellChrome: chrome,
       // Deep-link restore (page/position + GH commit/selection); App also writes URI
       initialRoute: {
+        openSessionId: current.openSessionId,
         page: current.routePage,
         position: current.routePosition,
         number: current.number,

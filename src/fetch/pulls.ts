@@ -41,7 +41,7 @@ export async function fetchOpenPullsPublic(owner: any, repo: any, fetchImpl: any
     throw err;
   }
   const data = await res.json();
-  return enrichPullsListIndicators(owner, repo, data.map(mapApiPullRequest), fetchImpl, token, ctx);
+  return data.map(mapApiPullRequest);
 }
 
 /**
@@ -114,7 +114,7 @@ export async function fetchPullByNumber(owner: any, repo: any, pullNumber: any, 
 const PULLS_LIST_SNAPSHOT_MAX = 100;
 
 /** Row indicators and aggregate check counts; no individual check nodes. */
-const LIST_INDICATOR_FIELDS = `author { login } viewerDidAuthor
+const LIST_INDICATOR_FIELDS = `author { login }
   additions deletions changedFiles statusCheckRollup {
     state
     contexts {
@@ -146,15 +146,16 @@ function mapListIndicators(pr: any) {
   return fields;
 }
 
-/** Optional enrichment must never prevent the native list / stack from loading. */
+/** Runs only after the REST tree has been displayed. */
 async function enrichPullsListIndicators(owner: any, repo: any, prs: any[], fetchImpl: any, token: any, ctx: any) {
   if (!token || !prs.length) return prs;
   const numbers = [...new Set(prs.map((pr) => Number(pr.number)))]
     .filter((n) => Number.isInteger(n) && n > 0).slice(0, PULLS_LIST_SNAPSHOT_MAX);
   if (!numbers.length) return prs;
+  const knownAuthors = new Set(prs.filter(pr => typeof pr.viewerDidAuthor === 'boolean').map(pr => Number(pr.number)));
   const query = `query PullsListIndicators($owner:String!,$repo:String!) {
   repository(owner:$owner,name:$repo) {
-    ${numbers.map((n) => `p${n}:pullRequest(number:${n}) { ${LIST_INDICATOR_FIELDS} }`).join('\n    ')}
+    ${numbers.map((n) => `p${n}:pullRequest(number:${n}) { ${LIST_INDICATOR_FIELDS} ${knownAuthors.has(n) ? '' : 'viewerDidAuthor'} }`).join('\n    ')}
   }
 }`;
   try {
@@ -166,6 +167,24 @@ async function enrichPullsListIndicators(owner: any, repo: any, prs: any[], fetc
   } catch {
     return prs;
   }
+}
+
+/** Optional row metadata. Never returns structural fields from its older input. */
+export async function fetchPullsListExtras(owner: any, repo: any, prs: any[], fetchImpl: any, token: any = null, ctx: any = null) {
+  const rows = (Array.isArray(prs) ? prs : []).slice(0, PULLS_LIST_SNAPSHOT_MAX);
+  if (!rows.length) return [];
+  const [enriched, autolinks] = await Promise.all([
+    enrichPullsListIndicators(owner, repo, rows, fetchImpl, token, ctx),
+    fetchRepoAutolinks(owner, repo, fetchImpl, token, ctx),
+  ]);
+  return attachMagicLinks(enriched, autolinks).map((pr: any) => {
+    const patch: any = { number: pr.number, magicLinks: pr.magicLinks };
+    for (const key of ['viewerDidAuthor', 'additions', 'deletions', 'changedFiles',
+      'listChecksState', 'listChecksPassed', 'listChecksTotal']) {
+      if (Object.prototype.hasOwnProperty.call(pr, key)) patch[key] = pr[key];
+    }
+    return patch;
+  });
 }
 
 /**
@@ -271,7 +290,7 @@ export async function fetchDanglingPulls(owner: any, repo: any, numbers: any, fe
     }
   });
 
-  return enrichPullsListIndicators(owner, repo, settled.filter(Boolean), fetchImpl, token, ctx);
+  return settled.filter(Boolean);
 }
 
 /**

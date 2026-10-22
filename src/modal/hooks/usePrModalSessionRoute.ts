@@ -440,7 +440,7 @@ function scheduleNavigationFrame(run: () => void): NavigationFrameHandle {
   return { cancel };
 }
 
-/** Survives React remount while the same PR stays open (route writes remount host). */
+/** Survives React remount within one open session (route writes remount host). */
 let restoredSessionPrKey: string | null = null;
 
 /** session URI */
@@ -695,7 +695,6 @@ export function usePrModalSessionRoute(b: any) {
   const setCollapsedFiles = b.setCollapsedFiles;
   const setCommentIndex = b.setCommentIndex;
   const setCommentText = b.setCommentText;
-  const setDiffMode = b.setDiffMode;
   const setEditingBody = b.setEditingBody;
   const setEditingComment = b.setEditingComment;
   const setExpandedDirs = b.setExpandedDirs;
@@ -773,7 +772,10 @@ export function usePrModalSessionRoute(b: any) {
 
   useEffect(() => {
     if (!open || !detail?.owner || !detail?.repo || !detail?.number) return;
-    const key = `${detail.owner}/${detail.repo}#${detail.number}`;
+    const prKey = `${detail.owner}/${detail.repo}#${detail.number}`;
+    const key = initialRoute?.openSessionId != null
+      ? `${prKey}@${initialRoute.openSessionId}`
+      : prKey;
     if (
       routeRestoreKeyRef.current === key ||
       restoredSessionPrKey === key
@@ -864,10 +866,7 @@ export function usePrModalSessionRoute(b: any) {
             : LAYOUT_CENTERED
         );
       }
-      if (stored.diffMode === 'split' || stored.diffMode === 'unified') {
-        setDiffMode(stored.diffMode);
-      }
-      // hideWhitespace is global (diff-global-prefs); do not restore per-PR session over it.
+      // Diff display settings are global; per-PR sessions must not override them.
       if (Array.isArray(stored.collapsedFiles)) {
         setCollapsedFiles(new Set(stored.collapsedFiles));
       }
@@ -909,8 +908,8 @@ export function usePrModalSessionRoute(b: any) {
     detail?.repo,
     detail?.number,
     initialRoute?.page,
+    initialRoute?.openSessionId,
     setLayoutMode,
-    setDiffMode,
     setCollapsedFiles,
     setViewedPaths,
     setActiveFilePath,

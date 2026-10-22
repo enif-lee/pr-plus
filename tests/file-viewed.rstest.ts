@@ -4,6 +4,7 @@
 import { describe, expect, test } from '@rstest/core';
 import {
   applyViewedToggle,
+  resolveNextUnreadFile,
   buildFetchViewerViewedFilesGraphql,
   buildMarkFileAsViewedGraphql,
   buildUnmarkFileAsViewedGraphql,
@@ -103,5 +104,23 @@ describe('shouldApplyServerViewedPaths', () => {
         viewedPaths: ['a.ts'],
       })
     ).toBe(true);
+  });
+});
+
+describe('focus after the active file leaves the unread list', () => {
+  const files = ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map(filename => ({ filename }));
+  test('moves forward in explorer order and skips other removed paths', () => {
+    expect(resolveNextUnreadFile(files, [files[0], files[2], files[3]], 'b.ts')).toBe('c.ts');
+    expect(resolveNextUnreadFile(files, [files[0], files[3]], 'b.ts')).toBe('d.ts');
+  });
+  test('falls back to the preceding remaining file at the end', () => {
+    expect(resolveNextUnreadFile(files, files.slice(0, 3), 'd.ts')).toBe('c.ts');
+  });
+  test('clears focus when no unread files remain', () => {
+    expect(resolveNextUnreadFile(files, [], 'd.ts')).toBe(null);
+  });
+  test('does not introduce paths excluded by other filters', () => {
+    expect(resolveNextUnreadFile([files[1], files[3]], [files[3]], 'b.ts')).toBe('d.ts');
+    expect(resolveNextUnreadFile(files, files, 'not-in-list.ts')).toBe(null);
   });
 });

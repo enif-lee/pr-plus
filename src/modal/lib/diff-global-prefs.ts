@@ -1,5 +1,5 @@
 /**
- * Global Diff view preferences: hide whitespace + hide outdated comments +
+ * Global Diff view preferences: unified/split + hide whitespace + hide outdated comments +
  * intra-line word highlight / strikethrough. Orthogonal to per-PR
  * session-view; survives PR switches and reloads.
  * Pure — no chrome.* dependency; storage is injected.
@@ -8,6 +8,7 @@
 export const DIFF_GLOBAL_PREFS_KEY = 'prp:diff-global-prefs';
 
 export type DiffGlobalPrefs = {
+  diffMode: 'unified' | 'split';
   hideWhitespace: boolean;
   hideOutdated: boolean;
   /** Intra-line word highlight on paired change rows. Default on. */
@@ -19,6 +20,7 @@ export type DiffGlobalPrefs = {
 };
 
 export const DEFAULT_DIFF_GLOBAL_PREFS: DiffGlobalPrefs = {
+  diffMode: 'unified',
   hideWhitespace: false,
   hideOutdated: false,
   wordHighlight: true,
@@ -40,6 +42,7 @@ export function normalizeDiffGlobalPrefs(raw: unknown): DiffGlobalPrefs {
   }
   const o = raw as Record<string, unknown>;
   return {
+    diffMode: o.diffMode === 'split' ? 'split' : 'unified',
     hideWhitespace: Boolean(o.hideWhitespace),
     hideOutdated: Boolean(o.hideOutdated),
     wordHighlight: prefBool(o.wordHighlight, DEFAULT_DIFF_GLOBAL_PREFS.wordHighlight),

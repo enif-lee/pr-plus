@@ -213,9 +213,12 @@ function applyTreeIndents(doc: any, forest: any) {
 
   // Moving an already ordered row detaches its focused checkbox. GitHub updates
   // row classes on selection, so decoration repair must not move those rows.
-  for (let i = 0; i < orderedRows.length; i += 1) {
-    const current = [...parent.children].filter((el: any) => orderedRows.includes(el));
-    if (current[i] !== orderedRows[i]) parent.insertBefore(orderedRows[i], current[i] || null);
+  const rowSet = new Set(orderedRows);
+  let cursor = parent.firstElementChild;
+  for (const row of orderedRows) {
+    while (cursor && !rowSet.has(cursor)) cursor = cursor.nextElementSibling;
+    if (row === cursor) cursor = cursor.nextElementSibling;
+    else parent.insertBefore(row, cursor);
   }
 
   let applied = 0;
@@ -471,9 +474,12 @@ function buildOpenedMeta(doc: any, pr: any, bits: any) {
     if (author) {
       author.classList.add('pr-tree-author-self');
       const marker = listMessage(doc, 'list_author_me');
-      author.appendChild(doc.createTextNode(` ${marker}`));
+      const self = doc.createElement('span');
+      self.className = 'pr-tree-author-me';
+      self.textContent = marker;
+      author.appendChild(self);
       const label = author.getAttribute('aria-label');
-      if (label) author.setAttribute('aria-label', `${label} ${marker}`);
+      if (label) author.setAttribute('aria-label', `${label}${marker}`);
     }
   }
   return wrap;
@@ -600,7 +606,21 @@ function fillMetaContent(doc: any, meta: any, pr: any, reviewState: any, nativeS
   const signature = next.innerHTML;
   if (meta.__prTreeContent === signature) return false;
   meta.__prTreeContent = signature;
-  meta.replaceChildren(...next.childNodes);
+  // Keep unchanged author/relative-time nodes connected when only badges change.
+  // Reconnecting GitHub's relative-time custom element resets its displayed text.
+  const oldChildren = [...meta.children];
+  const kept = new Set();
+  let cursor = meta.firstChild;
+  for (const child of [...next.children]) {
+    const source = child.outerHTML;
+    const existing = oldChildren.find((el: any) => !kept.has(el) && el.__prTreeSource === source);
+    const node = existing || child;
+    node.__prTreeSource = source;
+    kept.add(node);
+    if (node === cursor) cursor = cursor.nextSibling;
+    else meta.insertBefore(node, cursor);
+  }
+  for (const child of oldChildren) if (!kept.has(child)) child.remove();
   return true;
 }
 
@@ -687,8 +707,6 @@ function applyListDecorations(doc: any, prs: any) {
     if (!pr) continue;
     if (applyRowMeta(doc, row, pr)) applied += 1;
   }
-  // Pull in any deferred review text that already landed.
-  refreshReviewBadges(doc, prs);
   return applied;
 }
 

@@ -12,6 +12,8 @@ import {
   fetchPullsListSnapshot,
   fetchOpenPullsPublic,
   fetchDanglingPulls,
+  fetchOpenPulls,
+  fetchPullsListExtras,
 } from '../src/fetch/pulls';
 
 function loadDomApi() {
@@ -249,62 +251,105 @@ describe('applyListRowSnapshot / hideStaleListRow (React list rows)', () => {
   });
 });
 
-describe('list indicator enrichment', () => {
-  test('open list adds one batched scalar GraphQL query, preserving branch data', async () => {
+describe('progressive list metadata fetch', () => {
+  test('known author flags are omitted from revalidation, including false', async () => {
+    let query = '';
+    const patches = await fetchPullsListExtras('o', 'r', [
+      { number: 1, viewerDidAuthor: true }, { number: 2, viewerDidAuthor: false },
+    ], async (_url: string, init: any) => {
+      if (!init.body) return { ok: true, json: async () => [] };
+      query = JSON.parse(init.body).query;
+      return { ok: true, headers: new Headers(), json: async () => ({ data: { repository: {
+        p1: { additions: 2, deletions: 1, statusCheckRollup: null },
+        p2: { additions: 3, deletions: 2, statusCheckRollup: null },
+      } } }) };
+    }, 'token');
+    expect(query).not.toContain('viewerDidAuthor');
+    expect(patches[0].viewerDidAuthor).toBe(true);
+    expect(patches[1].viewerDidAuthor).toBe(false);
+  });
+
+  test('essential open and page-only PRs use REST without waiting for GraphQL/autolinks', async () => {
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: any) => {
+      calls.push(url);
+      expect(init.body).toBeUndefined();
+      expect(url).not.toContain('/autolinks');
+      return { ok: true, json: async () => url.includes('state=open')
+        ? [{ number: 1, user: { login: 'alice' }, head: { ref: 'feature', sha: 'head1' }, base: { ref: 'main', sha: 'base1' } }]
+        : { number: 7, user: { login: 'bob' }, head: { ref: 'closed-feature' }, base: { ref: 'feature' } } };
+    };
+    const prs = await fetchOpenPulls('o', 'r', fetchImpl, {
+      token: 'token', pagePrNumbers: [1, 7], includeAutolinks: false,
+    });
+    expect(calls).toHaveLength(2);
+    expect(prs.map((pr: any) => pr.number)).toEqual([1, 7]);
+    expect(prs[0]).toMatchObject({ headRef: 'feature', baseRef: 'main', headSha: 'head1', baseSha: 'base1' });
+    expect(prs[0]).not.toHaveProperty('viewerDidAuthor');
+  });
+
+  test('follow-up batches indicators and runs autolinks concurrently, returning only metadata patches', async () => {
     const calls: any[] = [];
+    let release: (value: any) => void;
+    const gate = new Promise(resolve => { release = resolve; });
     const fetchImpl = async (url: string, init: any) => {
       calls.push({ url, init });
       if (!init.body) return { ok: true, json: async () => [
-        { number: 1, user: { login: 'alice' }, head: { ref: 'feature' }, base: { ref: 'main' } },
-        { number: 2, user: { login: 'bob' } },
+        { key_prefix: 'DEMO-', url_template: 'https://issues.example/<num>' },
       ] };
+      await gate;
       return { ok: true, headers: new Headers(), json: async () => ({ data: { repository: {
         p1: { viewerDidAuthor: true, additions: 0, deletions: 0, changedFiles: 0, statusCheckRollup: null },
-        p2: { viewerDidAuthor: false, additions: 20, deletions: 3, changedFiles: 1, statusCheckRollup: { state: 'PENDING' } },
+        p7: { viewerDidAuthor: false, additions: 20, deletions: 3, changedFiles: 1, statusCheckRollup: {
+          state: 'PENDING', contexts: { totalCount: 4, checkRunCountsByState: [{ state: 'SUCCESS', count: 3 }] },
+        } },
       } } }) };
     };
-    const prs = await fetchOpenPullsPublic('o', 'r', fetchImpl, 'token');
+    const pending = fetchPullsListExtras('o', 'r', [
+      { number: 1, title: 'DEMO-300', headRef: 'feature', baseRef: 'main' },
+      { number: 7, title: 'Closed PR' },
+    ], fetchImpl, 'token');
     expect(calls).toHaveLength(2);
-    const query = JSON.parse(calls[1].init.body).query;
+    const query = JSON.parse(calls[0].init.body).query;
     expect(query).toContain('p1:pullRequest(number:1)');
-    expect(query).toContain('p2:pullRequest(number:2)');
+    expect(query).toContain('p7:pullRequest(number:7)');
+    expect(query.match(/viewerDidAuthor/g)).toHaveLength(2);
     expect(query).toContain('checkRunCountsByState { state count }');
-    expect(query).toContain('statusContextCountsByState { state count }');
     expect(query).not.toContain('nodes');
-    expect(query).not.toContain('edges');
-    expect(prs[0]).toMatchObject({ headRef: 'feature', baseRef: 'main', viewerDidAuthor: true,
-      additions: 0, deletions: 0, changedFiles: 0, listChecksState: null });
-    expect(prs[1].listChecksState).toBe('PENDING');
+    release(null);
+    const patches = await pending;
+    expect(patches[0]).toMatchObject({ number: 1, viewerDidAuthor: true, additions: 0, deletions: 0,
+      listChecksState: null, magicLinks: [{ key: 'DEMO-300', url: 'https://issues.example/300' }] });
+    expect(patches[0]).not.toHaveProperty('title');
+    expect(patches[0]).not.toHaveProperty('headRef');
+    expect(patches[1]).toMatchObject({ number: 7, listChecksState: 'PENDING', listChecksPassed: 3, listChecksTotal: 4 });
   });
 
-  test('missing auth or failed enrichment preserves REST list without invented indicators', async () => {
+  test('unavailable indicators/autolinks do not invent status or fail the follow-up', async () => {
     for (const token of [null, 'token']) {
-      let calls = 0;
-      const fetchImpl = async (_url: string, init: any) => {
-        calls += 1;
-        if (init.body) throw new Error('GraphQL unavailable');
-        return { ok: true, json: async () => [{ number: 1, user: { login: 'alice' } }] };
-      };
-      const prs = await fetchOpenPullsPublic('o', 'r', fetchImpl, token);
-      expect(calls).toBe(token ? 2 : 1);
-      expect(prs[0].author).toBe('alice');
-      expect(prs[0].additions).toBeNull();
-      expect(prs[0]).not.toHaveProperty('listChecksState');
-      expect(prs[0]).not.toHaveProperty('viewerDidAuthor');
+      const patches = await fetchPullsListExtras('o', 'r', [{ number: 1 }], async () => {
+        throw new Error('offline');
+      }, token);
+      expect(patches).toEqual([{ number: 1, magicLinks: [] }]);
     }
   });
 
-  test('filtered / closed PRs fetched by number also get batched indicators', async () => {
-    const calls: any[] = [];
-    const fetchImpl = async (url: string, init: any) => {
+  test('optional autolink failure preserves links already present in a refreshed snapshot', async () => {
+    const links = [{ key: 'ENG-7', url: 'https://issues.example/7' }];
+    const patches = await fetchPullsListExtras('o', 'r', [{ number: 1, magicLinks: links }],
+      async () => { throw new Error('offline'); }, 'token');
+    expect(patches).toEqual([{ number: 1, magicLinks: links }]);
+  });
+
+  test('standalone REST helpers never query indicators', async () => {
+    const calls: string[] = [];
+    const fetchImpl = async (url: string) => {
       calls.push(url);
-      return { ok: true, headers: new Headers(), json: async () => init.body
-        ? { data: { repository: { p7: { viewerDidAuthor: false, additions: 8,
-          deletions: 1, changedFiles: 1, statusCheckRollup: { state: 'SUCCESS' } } } } }
-        : { number: 7, user: { login: 'bob' } } };
+      return { ok: true, json: async () => url.includes('state=open') ? [{ number: 1 }] : { number: 7 } };
     };
-    const prs = await fetchDanglingPulls('o', 'r', [7], fetchImpl, 'token');
+    await fetchOpenPullsPublic('o', 'r', fetchImpl, 'token');
+    await fetchDanglingPulls('o', 'r', [7], fetchImpl, 'token');
     expect(calls).toHaveLength(2);
-    expect(prs[0]).toMatchObject({ additions: 8, listChecksState: 'SUCCESS', viewerDidAuthor: false });
+    expect(calls.every(url => !url.endsWith('/graphql'))).toBe(true);
   });
 });

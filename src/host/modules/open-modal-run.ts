@@ -306,6 +306,7 @@
       hasDetail: Boolean(initialDetail),
     });
     current = {
+      openSessionId: gen,
       open: true,
       loading: !initialDetail,
       error: null,

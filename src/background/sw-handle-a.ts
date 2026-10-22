@@ -12,6 +12,8 @@ import {
 } from './sw-enterprise';
 import { clearDetailCacheOnGithubTabs } from './sw-broadcast';
 import { getExtensionDetailIdb } from './sw-detail-cache';
+import { listIndicatorsCache, listIndicatorsScope, mergeCachedListIndicators } from './sw-list-indicators-cache';
+import { viewerIdentityCache, applyViewerIdentity } from './sw-viewer-identity';
 import {
   beginTrackedFetch,
   endTrackedFetch,
@@ -59,6 +61,9 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
           host: sel.host,
         };
       }
+      // Warm identity during plugin activation, before list rendering starts.
+      void viewerIdentityCache.get(sel.host, sel.token, () =>
+        PRTreeFetch.fetchViewerIdentity(fetchImpl(), sel.token, apiCtx));
       return {
         ok: true,
         configured: true,
@@ -242,6 +247,7 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
     }
     case MSG.CLEAR_DETAIL_CACHE: {
       await getExtensionDetailIdb().clear();
+      await listIndicatorsCache.clear();
       const result = await clearDetailCacheOnGithubTabs();
       return { ok: true, durable: true, ...(result as any) };
     }
@@ -249,6 +255,10 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
+        void viewerIdentityCache.get(apiCtx.webHost, token, () =>
+          PRTreeFetch.fetchViewerIdentity(fetchImpl(), token, apiCtx));
+        const cached = listIndicatorsScope(apiCtx.webHost, String(message.owner), String(message.repo), token)
+          .then(scope => listIndicatorsCache.read(scope)).catch(() => ({}));
         const prs = await PRTreeFetch.fetchOpenPulls(
           message.owner,
           message.repo,
@@ -258,10 +268,11 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
             pagePrNumbers: Array.isArray(message.pagePrNumbers)
               ? message.pagePrNumbers
               : [],
+            includeAutolinks: message.includeAutolinks !== false,
             ctx: apiCtx,
           }
         );
-        return { ok: true, prs };
+        return { ok: true, prs: applyViewerIdentity(mergeCachedListIndicators(prs, await cached), await viewerIdentityCache.peek(apiCtx.webHost, token)) };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
         throw err;
@@ -273,12 +284,47 @@ export async function handleMessagePartA(message: SwMessage): Promise<unknown> {
       const tracked = beginTrackedFetch(message.requestId);
       try {
         const token = await tokenForMessage(message);
+        void viewerIdentityCache.get(apiCtx.webHost, token, () =>
+          PRTreeFetch.fetchViewerIdentity(fetchImpl(), token, apiCtx));
+        const cached = listIndicatorsScope(apiCtx.webHost, String(message.owner), String(message.repo), token)
+          .then(scope => listIndicatorsCache.read(scope)).catch(() => ({}));
         const prs = await PRTreeFetch.fetchDanglingPulls(
           message.owner,
           message.repo,
           Array.isArray(message.numbers) ? message.numbers : [],
           tracked.fetch,
           token, apiCtx);
+        return { ok: true, prs: applyViewerIdentity(mergeCachedListIndicators(prs, await cached), await viewerIdentityCache.peek(apiCtx.webHost, token)) };
+      } catch (err) {
+        if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };
+        throw err;
+      } finally {
+        endTrackedFetch(tracked.requestId);
+      }
+    }
+    case MSG.FETCH_PULLS_LIST_EXTRAS: {
+      const tracked = beginTrackedFetch(message.requestId);
+      const observedAt = Date.now();
+      try {
+        const token = await tokenForMessage(message);
+        const scope = await listIndicatorsScope(apiCtx.webHost, String(message.owner), String(message.repo), token).catch(() => '');
+        const known = await listIndicatorsCache.read(scope);
+        const rows = (Array.isArray(message.prs) ? message.prs : []).map((pr: any) => {
+          const row = { ...pr };
+          delete row.viewerDidAuthor;
+          const viewerDidAuthor = known[pr.number]?.fields.viewerDidAuthor;
+          return typeof viewerDidAuthor === 'boolean' ? { ...row, viewerDidAuthor } : row;
+        });
+        void viewerIdentityCache.get(apiCtx.webHost, token, () =>
+          PRTreeFetch.fetchViewerIdentity(fetchImpl(), token, apiCtx));
+        const prs = await PRTreeFetch.fetchPullsListExtras(
+          message.owner, message.repo,
+          applyViewerIdentity(rows, await viewerIdentityCache.peek(apiCtx.webHost, token)),
+          tracked.fetch, token, apiCtx
+        );
+        if (!tracked.controller.signal.aborted) {
+          await listIndicatorsCache.save(scope, rows, prs, observedAt);
+        }
         return { ok: true, prs };
       } catch (err) {
         if (isAbortError(err)) return { ok: false, aborted: true, error: 'aborted' };

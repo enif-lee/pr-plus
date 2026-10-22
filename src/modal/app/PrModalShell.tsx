@@ -175,6 +175,7 @@ import {
 import { applyHideWhitespaceToFiles } from '../lib/hide-whitespace';
 import {
   applyViewedToggle,
+  resolveNextUnreadFile,
   shouldApplyServerViewedPaths,
 } from '../lib/file-viewed';
 import {
@@ -1371,6 +1372,7 @@ export function PrModalApp({
     // Re-apply global Diff display prefs (do not force defaults on PR switch).
     try {
       const g = loadDiffGlobalPrefs(resolveDiffGlobalPrefsStorage(window));
+      setDiffMode(g.diffMode);
       setHideWhitespace(g.hideWhitespace);
       setWordHighlight(g.wordHighlight);
       setWordStrike(g.wordStrike);
@@ -1379,7 +1381,7 @@ export function PrModalApp({
       /* keep current */
     }
     pullRequestGqlIdRef.current = null;
-  }, [prIdentity]);
+  }, [prIdentity, setDiffMode]);
 
   // Hydrate Mark file Viewed from GitHub (viewerViewedState) when token allows.
   useEffect(() => {
@@ -2884,6 +2886,34 @@ export function PrModalApp({
   }
 
   Object.assign(shellBag, { onSelectFile, onToggleFileCollapse });
+
+  const previousUnreadFilesRef = useRef<{
+    prIdentity: string;
+    files: any[];
+    viewedPaths: Set<string>;
+  } | null>(null);
+  useEffect(() => {
+    const previous = previousUnreadFilesRef.current;
+    previousUnreadFilesRef.current = { prIdentity, files: displayFiles, viewedPaths };
+    if (!open || layoutMode !== LAYOUT_DIFF || !fileUnreadOnly ||
+        !previous || previous.prIdentity !== prIdentity) return;
+    const active = String(useModalStore.getState().activeFilePath || '');
+    if (!active || !viewedPaths.has(active) || previous.viewedPaths.has(active) ||
+        !previous.files.some((file: any) => (file.filename || file.path) === active)) return;
+    const next = resolveNextUnreadFile(previous.files, displayFiles, active);
+    if (next) {
+      shellBag.onSelectFile(next);
+      if (singleFileMode) {
+        setScrollTop(0);
+        if (listRef.current) listRef.current.scrollTop = 0;
+      }
+    } else {
+      shellBag.clearLineSelectionForNav();
+      useModalStore.getState().setActiveFilePath(null);
+    }
+  }, [displayFiles, viewedPaths, open, layoutMode, fileUnreadOnly, prIdentity,
+      shellBag, singleFileMode, setScrollTop]);
+
 
   function focusCommentBox() {
     try {

@@ -26,6 +26,7 @@ export const prTreeFetchPartA = {
         owner,
         repo,
         pagePrNumbers: options.pagePrNumbers || [],
+        includeAutolinks: options.includeAutolinks !== false,
       },
       { signal: options.signal || null }
     );
@@ -74,6 +75,18 @@ export const prTreeFetchPartA = {
       matchedNumbers: res.matchedNumbers || [],
       prs: res.prs || [],
     };
+  },
+  async fetchPullsListExtras(owner: any, repo: any, prs: any[], opts: any = {}) {
+    const res = await send({
+      type: MSG.FETCH_PULLS_LIST_EXTRAS, owner, repo,
+      prs: (prs || []).map(({ number, title, author, authorId, body, baseRef, headRef, baseSha, headSha, magicLinks, viewerDidAuthor }: any) =>
+        ({ number, title, author, authorId, body, baseRef, headRef, baseSha, headSha, magicLinks, viewerDidAuthor })),
+    }, { signal: opts.signal || null });
+    if (!res?.ok) {
+      if (res?.aborted) throw makeAbortError();
+      throw new Error(res?.error || 'Failed to fetch pulls list extras');
+    }
+    return res.prs || [];
   },
   /**
    * @param {{ skipReviewThreads?: boolean, threadsMaxPages?: number, fastIdentityOnly?: boolean, retryMilestone?: boolean, coalesceKey?: string }} [opts]

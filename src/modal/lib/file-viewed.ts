@@ -186,3 +186,14 @@ export function shouldApplyServerViewedPaths(res: any): boolean {
   const id = res.pullRequestId ?? res.pullRequest?.id ?? null;
   return Boolean(id && String(id).trim());
 }
+
+/** After a viewed file leaves the unread list, prefer the next path, then the previous. */
+export function resolveNextUnreadFile(previousFiles: any[], remainingFiles: any[], activePath: string): string | null {
+  const pathOf = (file: any) => String(file?.filename || file?.path || '');
+  const previous = previousFiles.map(pathOf);
+  const index = previous.indexOf(activePath);
+  if (index < 0) return null;
+  const remaining = new Set(remainingFiles.map(pathOf));
+  return previous.slice(index + 1).find((path) => remaining.has(path)) ||
+    previous.slice(0, index).reverse().find((path) => remaining.has(path)) || null;
+}

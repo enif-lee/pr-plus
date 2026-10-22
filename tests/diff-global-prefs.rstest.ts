@@ -3,6 +3,7 @@
  */
 import { describe, expect, test } from '@rstest/core';
 import {
+  type DiffGlobalPrefs,
   DEFAULT_DIFF_GLOBAL_PREFS,
   DIFF_GLOBAL_PREFS_KEY,
   loadDiffGlobalPrefs,
@@ -50,6 +51,7 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
     expect(
       normalizeDiffGlobalPrefs({ hideWhitespace: true, hideOutdated: false })
     ).toEqual({
+      diffMode: 'unified',
       hideWhitespace: true,
       hideOutdated: false,
       wordHighlight: true,
@@ -59,6 +61,7 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
     expect(
       normalizeDiffGlobalPrefs({ hideWhitespace: 1, hideOutdated: 'yes' })
     ).toEqual({
+      diffMode: 'unified',
       hideWhitespace: true,
       hideOutdated: true,
       wordHighlight: true,
@@ -67,6 +70,7 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
     });
     expect(
       normalizeDiffGlobalPrefs({
+        diffMode: 'unified',
         hideWhitespace: false,
         hideOutdated: false,
         wordHighlight: false,
@@ -74,6 +78,7 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
         dimUnfocusedFiles: false,
       })
     ).toEqual({
+      diffMode: 'unified',
       hideWhitespace: false,
       hideOutdated: false,
       wordHighlight: false,
@@ -95,6 +100,12 @@ describe('normalizeDiffGlobalPrefs / parse', () => {
   });
 });
 
+test('diff mode defaults for legacy / invalid values and preserves split', () => {
+  expect(parseDiffGlobalPrefs('{"hideWhitespace":true}').diffMode).toBe('unified');
+  expect(normalizeDiffGlobalPrefs({ diffMode: 'invalid' }).diffMode).toBe('unified');
+  expect(normalizeDiffGlobalPrefs({ diffMode: 'split' }).diffMode).toBe('split');
+});
+
 describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
   test('missing storage → defaults, no throw', () => {
     expect(loadDiffGlobalPrefs(null)).toEqual(DEFAULT_DIFF_GLOBAL_PREFS);
@@ -111,14 +122,9 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
   });
 
   test('write both true/false combos and read back', () => {
-    const cases: Array<{
-      hideWhitespace: boolean;
-      hideOutdated: boolean;
-      wordHighlight: boolean;
-      wordStrike: boolean;
-      dimUnfocusedFiles: boolean;
-    }> = [
+    const cases: Array<DiffGlobalPrefs> = [
       {
+        diffMode: 'unified',
         hideWhitespace: false,
         hideOutdated: false,
         wordHighlight: true,
@@ -126,6 +132,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
         dimUnfocusedFiles: true,
       },
       {
+        diffMode: 'split',
         hideWhitespace: true,
         hideOutdated: false,
         wordHighlight: false,
@@ -133,6 +140,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
         dimUnfocusedFiles: false,
       },
       {
+        diffMode: 'unified',
         hideWhitespace: false,
         hideOutdated: true,
         wordHighlight: true,
@@ -140,6 +148,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
         dimUnfocusedFiles: true,
       },
       {
+        diffMode: 'unified',
         hideWhitespace: true,
         hideOutdated: true,
         wordHighlight: false,
@@ -162,6 +171,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     const s = makeStorage();
     expect(saveDiffGlobalPrefs(s, { hideWhitespace: true })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: true,
       hideOutdated: false,
       wordHighlight: true,
@@ -170,6 +180,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     });
     expect(saveDiffGlobalPrefs(s, { hideOutdated: true })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: true,
       hideOutdated: true,
       wordHighlight: true,
@@ -178,6 +189,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     });
     expect(saveDiffGlobalPrefs(s, { hideWhitespace: false })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: false,
       hideOutdated: true,
       wordHighlight: true,
@@ -186,6 +198,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     });
     expect(saveDiffGlobalPrefs(s, { wordHighlight: false })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: false,
       hideOutdated: true,
       wordHighlight: false,
@@ -194,6 +207,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     });
     expect(saveDiffGlobalPrefs(s, { wordStrike: false })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: false,
       hideOutdated: true,
       wordHighlight: false,
@@ -202,6 +216,7 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     });
     expect(saveDiffGlobalPrefs(s, { dimUnfocusedFiles: false })).toBe(true);
     expect(loadDiffGlobalPrefs(s)).toEqual({
+      diffMode: 'unified',
       hideWhitespace: false,
       hideOutdated: true,
       wordHighlight: false,
@@ -225,4 +240,25 @@ describe('loadDiffGlobalPrefs / saveDiffGlobalPrefs round-trip', () => {
     ).toBe(session as any);
     expect(resolveDiffGlobalPrefsStorage(null)).toBe(null);
   });
+});
+
+test('real store setter saves display mode for other PRs and future mounts', () => {
+  const { useModalStore } = require('../src/modal/store/modal-store') as typeof import('../src/modal/store/modal-store');
+  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const previousMode = useModalStore.getState().diffMode;
+  const storage = makeStorage();
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: storage } });
+  try {
+    saveDiffGlobalPrefs(storage, { hideWhitespace: true, wordHighlight: false });
+    useModalStore.getState().setDiffMode('split');
+    useModalStore.getState().resetForClose();
+    expect(useModalStore.getState().diffMode).toBe('split');
+    expect(loadDiffGlobalPrefs(storage)).toMatchObject({ diffMode: 'split', hideWhitespace: true, wordHighlight: false });
+    useModalStore.getState().setDiffMode('unified');
+    expect(loadDiffGlobalPrefs(storage).diffMode).toBe('unified');
+  } finally {
+    useModalStore.getState().setDiffMode(previousMode);
+    if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow);
+    else delete (globalThis as any).window;
+  }
 });

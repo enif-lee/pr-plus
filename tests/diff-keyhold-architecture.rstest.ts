@@ -137,6 +137,10 @@ describe('Diff key-hold architecture', () => {
     expect(src).toMatch(/let restoredSessionPrKey:\s*string \| null/);
     expect(src).toMatch(/restoredSessionPrKey === key/);
     expect(src).toMatch(/restoredSessionPrKey = null/);
+    // A new list open must bypass the same-PR remount latch.
+    expect(src).toMatch(/initialRoute\?\.openSessionId/);
+    expect(read('src/host/modules/open-modal-run.ts')).toMatch(/openSessionId:\s*gen/);
+    expect(read('src/host/modules/props-build.ts')).toMatch(/openSessionId:\s*current\.openSessionId/);
   });
 
   test('selection route writes stamp the inbound dedupe key before host echo', () => {
