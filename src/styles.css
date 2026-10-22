@@ -1410,11 +1410,11 @@ html[data-color-mode='dark'] .prp-pp-help__action {
   color: var(--fgColor-default, #e6edf3);
 }
 
-.js-issue-row.pr-tree-indented,
-li[role='listitem'].pr-tree-indented,
-div[id^='issue_'].pr-tree-indented,
-li:has(a[data-testid='listitem-title-link']).pr-tree-indented,
-.pr-tree-indented {
+.js-issue-row:is(.pr-tree-indented, [data-pr-tree-depth]),
+li[role='listitem']:is(.pr-tree-indented, [data-pr-tree-depth]),
+div[id^='issue_']:is(.pr-tree-indented, [data-pr-tree-depth]),
+li:has(a[data-testid='listitem-title-link']):is(.pr-tree-indented, [data-pr-tree-depth]),
+:is(.pr-tree-indented, [data-pr-tree-depth]) {
   position: relative;
   box-sizing: border-box;
   margin-left: calc(var(--pr-tree-depth, 0) * 24px) !important;
@@ -1422,17 +1422,17 @@ li:has(a[data-testid='listitem-title-link']).pr-tree-indented,
 }
 
 /* React pulls dashboard rows are display:grid + width 100%; shrink so indent is visible. */
-li:has(a[data-testid='listitem-title-link']).pr-tree-indented {
+li:has(a[data-testid='listitem-title-link']):is(.pr-tree-indented, [data-pr-tree-depth]) {
   width: calc(100% - var(--pr-tree-depth, 0) * 24px) !important;
   max-width: 100%;
 }
 
-.pr-tree-indented:not([data-pr-tree-depth='0']) {
+:is(.pr-tree-indented, [data-pr-tree-depth]):not([data-pr-tree-depth='0']) {
   border-left: 2px solid
     color-mix(in srgb, var(--fgColor-accent, #0969da) 35%, transparent);
 }
 
-.pr-tree-indented[data-pr-tree-depth='0'] {
+:is(.pr-tree-indented, [data-pr-tree-depth])[data-pr-tree-depth='0'] {
   padding-left: 0;
 }
 
@@ -1531,7 +1531,7 @@ div.pr-tree-row-meta {
 
 /* Single branch chip — muted gray, low emphasis */
 .pr-tree-badge-branch {
-  max-width: min(42vw, 280px);
+  max-width: min(100%, 560px);
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 10.5px;
   font-weight: 500;
@@ -1636,3 +1636,55 @@ html[data-color-mode='dark'] a.pr-tree-badge-magic {
 html[data-color-mode='dark'] .pr-tree-author {
   color: #8b949e !important;
 }
+
+/* Row data attributes survive GitHub selection's className replacement. */
+html .pr-tree-row-meta .pr-tree-author.pr-tree-author-self {
+  color: var(--fgColor-accent, #0969da) !important;
+  font-weight: 700;
+}
+/* Lower-row badges share geometry and a neutral default surface. */
+:root .pr-tree-row-meta .pr-tree-badge {
+  box-sizing: border-box;
+  height: 20px;
+  padding: 0 6px;
+  gap: 4px;
+  border: 1px solid var(--borderColor-muted, #d1d9e0);
+  border-radius: 6px;
+  background: var(--bgColor-muted, #f6f8fa);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: normal;
+  opacity: 1;
+}
+:root .pr-tree-row-meta .pr-tree-badge-branch {
+  height: auto;
+  min-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* Geometry stays shared; semantic badges tint the outline and surface. */
+:root .pr-tree-row-meta :is(.pr-tree-checks-failure, .pr-tree-badge-review-required) {
+  color: var(--fgColor-danger, #d1242f);
+  border-color: color-mix(in srgb, var(--fgColor-danger, #d1242f) 35%, var(--borderColor-muted, #d1d9e0));
+  background: color-mix(in srgb, var(--fgColor-danger, #d1242f) 9%, var(--bgColor-default, #fff));
+}
+:root .pr-tree-row-meta :is(.pr-tree-checks-pending, .pr-tree-badge-changes-requested) {
+  color: var(--fgColor-attention, #9a6700);
+  border-color: color-mix(in srgb, var(--fgColor-attention, #9a6700) 35%, var(--borderColor-muted, #d1d9e0));
+  background: color-mix(in srgb, var(--fgColor-attention, #9a6700) 9%, var(--bgColor-default, #fff));
+}
+:root .pr-tree-row-meta :is(.pr-tree-checks-success, .pr-tree-badge-approved) {
+  color: var(--fgColor-success, #1a7f37);
+  border-color: color-mix(in srgb, var(--fgColor-success, #1a7f37) 35%, var(--borderColor-muted, #d1d9e0));
+  background: color-mix(in srgb, var(--fgColor-success, #1a7f37) 9%, var(--bgColor-default, #fff));
+}
+.pr-tree-change-stats, .pr-tree-checks {
+  font-variant-numeric: tabular-nums;
+}
+.pr-tree-additions, .pr-tree-checks-success { color: var(--fgColor-success, #1a7f37); }
+.pr-tree-deletions, .pr-tree-checks-failure { color: var(--fgColor-danger, #d1242f); }
+.pr-tree-checks-pending { color: var(--fgColor-attention, #9a6700); }
+:root .pr-tree-row-meta .pr-tree-checks { gap: 2px; }
+.pr-tree-checks svg { flex: 0 0 12px; }

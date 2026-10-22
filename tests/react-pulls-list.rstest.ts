@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { formatMessage } from '../src/modal/lib/i18n';
 
 function loadDomApi() {
   const code = fs.readFileSync(
@@ -19,6 +20,7 @@ function loadDomApi() {
     globalThis: {},
   };
   sandbox.globalThis = sandbox;
+  sandbox.PRModalI18n = { formatMessage };
   sandbox.PRTree = {
     flattenPrTree(forest: any[]) {
       const out: any[] = [];
@@ -127,6 +129,150 @@ describe('React pulls dashboard list rows', () => {
     expect(rows[0].dataset.prTreeDepth).toBe('0');
     expect(rows[1].dataset.prTreeDepth).toBe('1');
     expect(rows[1].classList.contains('pr-tree-indented')).toBe(true);
+  });
+
+  test('selection class repair preserves checkbox focus and does not move ordered rows', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml(), { pretendToBeVisual: true }).window.document;
+    const forest = [{ pr: { number: 1 }, children: [{ pr: { number: 7 }, children: [] }] }];
+    api.applyTreeIndents(doc, forest);
+    api.applyListDecorations(doc, [{ number: 1 }, { number: 7 }]);
+    const row = api.findListRowByNumber(doc, 7);
+    const input = doc.createElement('input');
+    input.type = 'checkbox';
+    row.appendChild(input);
+    input.focus();
+    input.click();
+    // GitHub React rewrites className when the checkbox changes.
+    row.className = 'ListItem-module__listItem selectedRow';
+    const observer = new doc.defaultView!.MutationObserver(() => {});
+    observer.observe(row.parentElement, { childList: true, subtree: true });
+    api.applyTreeIndents(doc, forest);
+    api.applyListDecorations(doc, [{ number: 1 }, { number: 7 }]);
+    expect(doc.activeElement).toBe(input);
+    expect(input.checked).toBe(true);
+    expect(observer.takeRecords()).toHaveLength(0);
+    observer.disconnect();
+  });
+
+  test('Original clears persistent depth after React drops the decoration class', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    api.applyTreeIndents(doc, [{ pr: { number: 1 }, children: [{ pr: { number: 7 }, children: [] }] }]);
+    const row = api.findListRowByNumber(doc, 7);
+    row.className = 'selectedRow';
+    api.clearTreeIndents(doc);
+    expect(row.hasAttribute('data-pr-tree-depth')).toBe(false);
+    expect(row.style.getPropertyValue('--pr-tree-depth')).toBe('');
+    expect(api.collectPagePrNumbers(doc)).toEqual([7, 1]);
+  });
+
+  test('row indicators distinguish own PR, zero changes and each check state', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    doc.documentElement.setAttribute('data-prp-app-locale', 'ko');
+    const row = api.findListRowByNumber(doc, 7);
+    const pr = { number: 7, author: 'alice', viewerDidAuthor: true,
+      additions: 0, deletions: 12, changedFiles: 2, listChecksState: 'SUCCESS',
+      listChecksPassed: 3, listChecksTotal: 4 };
+    api.applyRowMeta(doc, row, pr);
+    expect(row.querySelector('.pr-tree-author-self')?.textContent).toBe('alice (me)');
+    expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
+    expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+    expect(row.querySelector('.pr-tree-badge-self')).toBeNull();
+    expect(row.querySelector('.pr-tree-change-stats')?.textContent).toBe('+0−12');
+    expect(row.querySelector('.pr-tree-row-meta .pr-tree-change-stats')).not.toBeNull();
+    expect(row.querySelector('[data-listview-item-title-container] > .pr-tree-change-stats')).toBeNull();
+    expect(row.querySelector('.pr-tree-checks-success')?.getAttribute('aria-label')).toBe('검사 통과 (성공 3 / 전체 4)');
+    expect(row.querySelector('.pr-tree-checks-success')?.textContent).toBe('3/4');
+    expect(row.querySelector('.pr-tree-checks-success svg')?.getAttribute('width')).toBe('12');
+    expect(row.querySelector('.pr-tree-checks-success')?.classList.contains('pr-tree-badge')).toBe(true);
+    for (const [state, kind] of [['FAILURE', 'failure'], ['ERROR', 'failure'],
+      ['PENDING', 'pending'], ['EXPECTED', 'pending']]) {
+      api.refreshReviewBadges(doc, [{ ...pr, listChecksState: state }]);
+      expect(row.querySelector(`.pr-tree-checks-${kind}`)).not.toBeNull();
+    }
+    api.refreshReviewBadges(doc, [{ ...pr, listChecksState: null }]);
+    expect(row.querySelector('.pr-tree-checks')).toBeNull();
+    api.applyRowMeta(doc, row, { number: 7, additions: null, deletions: null });
+    expect(row.querySelector('.pr-tree-change-stats')).toBeNull();
+    expect(row.querySelector('.pr-tree-checks')).toBeNull();
+    expect(row.querySelector('.pr-tree-badge-self')).toBeNull();
+  });
+
+  test('lower-row diff badges abbreviate thousands and retain exact hover counts', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    const row = api.findListRowByNumber(doc, 7);
+    const labels = doc.createElement('span');
+    labels.textContent = 'bug';
+    row.querySelector('h3')?.insertAdjacentElement('afterend', labels);
+    for (const [value, text] of [[999, '+999'], [1000, '+1k'], [1500, '+1.5k'], [12345, '+12.3k']]) {
+      api.applyRowMeta(doc, row, { number: 7, additions: value, deletions: 1500, changedFiles: 20 });
+      expect(row.querySelector('.pr-tree-additions')?.textContent).toBe(text);
+      expect(row.querySelector('.pr-tree-additions')?.getAttribute('title')).toBe(`+${value}`);
+      expect(row.querySelector('.pr-tree-deletions')?.textContent).toBe('−1.5k');
+      expect(row.querySelector('.pr-tree-change-stats')?.children.length).toBe(2);
+      expect(row.querySelector('h3')?.nextElementSibling).toBe(labels);
+      expect(row.querySelector('.pr-tree-change-stats')?.parentElement).toBe(row.querySelector('.pr-tree-row-meta'));
+      expect(row.querySelector('.pr-tree-change-stats')?.classList.contains('pr-tree-badge')).toBe(true);
+    }
+    api.clearListDecorations(doc);
+    expect(row.querySelector('.pr-tree-change-stats')).toBeNull();
+  });
+
+  test('branch badge preserves full names beyond the old character limit', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    const row = api.findListRowByNumber(doc, 7);
+    const baseRef = 'release/2026-long-running-integration-branch';
+    const headRef = 'feature/CAL-12345-improve-conversation-layout-and-review-experience';
+    api.applyRowMeta(doc, row, { number: 7, baseRef, headRef });
+    expect(row.querySelector('.pr-tree-badge-branch')?.textContent).toBe(`${baseRef} ← ${headRef}`);
+  });
+
+  test('unchanged deferred refresh preserves metadata nodes and reports no updates', () => {
+    const api = loadDomApi();
+    const doc = new JSDOM(reactPullsHtml()).window.document;
+    const pr = { number: 7, author: 'alice' };
+    api.applyListDecorations(doc, [pr]);
+    const meta = doc.querySelector('.pr-tree-row-meta');
+    const author = meta?.querySelector('.pr-tree-author');
+    expect(api.refreshReviewBadges(doc, [pr])).toBe(0);
+    expect(meta?.querySelector('.pr-tree-author')).toBe(author);
+  });
+
+  test('language preference changes refresh existing check descriptions without navigation', async () => {
+    const domApi = loadDomApi();
+    const page = new JSDOM(reactPullsHtml(), { url: 'https://github.com/o/r/pulls' });
+    const sandbox: any = { module: { exports: {} }, globalThis: null, console };
+    sandbox.globalThis = sandbox;
+    sandbox.PRModalI18n = { formatMessage };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/content-bootstrap.js'), 'utf8'), sandbox);
+    let onPrefs: any;
+    const prs = [{ number: 7, author: 'alice', viewerDidAuthor: true,
+      additions: 3, deletions: 1, changedFiles: 1, listChecksState: 'SUCCESS' }];
+    const app = sandbox.module.exports.createPrTreeApp({
+      document: page.window.document, window: page.window, PRTreeDOM: domApi,
+      PRTree: { buildPrTree: (items: any[]) => items.map(pr => ({ pr, children: [] })) },
+      PRTreeFetch: { fetchOpenPulls: async () => prs, findDanglingPrNumbers: () => [] },
+      PRTreeStorage: { getExtensionPrefs: async () => ({ treeView: false }),
+        watchExtensionPrefs: (cb: any) => { onPrefs = cb; return () => {}; } },
+    });
+    try {
+      expect((await app.bootstrap()).ok).toBe(true);
+      const row = domApi.findListRowByNumber(page.window.document, 7);
+      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
+      expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+      onPrefs({ uiLanguage: 'ko' });
+      expect(row.querySelector('.pr-tree-author')?.textContent).toBe('alice (me)');
+      expect(row.querySelector('.pr-tree-author-me')).toBeNull();
+      expect(row.querySelector('.pr-tree-badge-self')).toBeNull();
+      expect(row.querySelector('.pr-tree-checks')?.getAttribute('aria-label')).toBe('검사 통과');
+      expect(row.querySelector('.pr-tree-change-stats')?.textContent).toBe('+3−1');
+    } finally {
+      page.window.close();
+    }
   });
 
   test('applyRowMeta hides native description and paints #number', () => {

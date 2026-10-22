@@ -41,7 +41,7 @@ export async function fetchOpenPullsPublic(owner: any, repo: any, fetchImpl: any
     throw err;
   }
   const data = await res.json();
-  return data.map(mapApiPullRequest);
+  return enrichPullsListIndicators(owner, repo, data.map(mapApiPullRequest), fetchImpl, token, ctx);
 }
 
 /**
@@ -113,6 +113,61 @@ export async function fetchPullByNumber(owner: any, repo: any, pullNumber: any, 
 /** GitHub search API page cap; also bounds the per-row aliases in one query. */
 const PULLS_LIST_SNAPSHOT_MAX = 100;
 
+/** Row indicators and aggregate check counts; no individual check nodes. */
+const LIST_INDICATOR_FIELDS = `author { login } viewerDidAuthor
+  additions deletions changedFiles statusCheckRollup {
+    state
+    contexts {
+      totalCount
+      checkRunCountsByState { state count }
+      statusContextCountsByState { state count }
+    }
+  }`;
+
+function mapListIndicators(pr: any) {
+  const fields: any = {};
+  if (pr.author?.login) fields.author = String(pr.author.login);
+  if (typeof pr.viewerDidAuthor === 'boolean') fields.viewerDidAuthor = pr.viewerDidAuthor;
+  for (const key of ['additions', 'deletions', 'changedFiles']) {
+    if (typeof pr[key] === 'number' && pr[key] >= 0) fields[key] = pr[key];
+  }
+  if (Object.prototype.hasOwnProperty.call(pr, 'statusCheckRollup')) {
+    fields.listChecksState = pr.statusCheckRollup?.state || null;
+    const contexts = pr.statusCheckRollup?.contexts;
+    if (Number.isInteger(contexts?.totalCount) && contexts.totalCount >= 0) {
+      fields.listChecksTotal = contexts.totalCount;
+      fields.listChecksPassed = [
+        ...(contexts.checkRunCountsByState || []),
+        ...(contexts.statusContextCountsByState || []),
+      ].filter((entry: any) => entry.state === 'SUCCESS')
+        .reduce((sum: number, entry: any) => sum + entry.count, 0);
+    }
+  }
+  return fields;
+}
+
+/** Optional enrichment must never prevent the native list / stack from loading. */
+async function enrichPullsListIndicators(owner: any, repo: any, prs: any[], fetchImpl: any, token: any, ctx: any) {
+  if (!token || !prs.length) return prs;
+  const numbers = [...new Set(prs.map((pr) => Number(pr.number)))]
+    .filter((n) => Number.isInteger(n) && n > 0).slice(0, PULLS_LIST_SNAPSHOT_MAX);
+  if (!numbers.length) return prs;
+  const query = `query PullsListIndicators($owner:String!,$repo:String!) {
+  repository(owner:$owner,name:$repo) {
+    ${numbers.map((n) => `p${n}:pullRequest(number:${n}) { ${LIST_INDICATOR_FIELDS} }`).join('\n    ')}
+  }
+}`;
+  try {
+    const data = await apiGraphql(query, { owner, repo }, fetchImpl, token, ctx);
+    return prs.map((pr) => {
+      const row = data?.repository?.[`p${pr.number}`];
+      return row ? { ...pr, ...mapListIndicators(row) } : pr;
+    });
+  } catch {
+    return prs;
+  }
+}
+
 /**
  * Turn the /pulls `q` filter into a repo-scoped PR search query. Missing or
  * blank `q` is GitHub's default list (`is:pr is:open`).
@@ -146,6 +201,7 @@ export async function fetchPullsListSnapshot(owner: any, repo: any, opts: any, f
   // Fragment first: apiGraphql injects rateLimit before the document's last `}`
   const query = `${numbers.length ? `fragment ListRowPr on PullRequest {
   number title state isDraft totalCommentsCount
+  ${LIST_INDICATOR_FIELDS}
   labels(first:20) { nodes { name color description } }
 }
 ` : ''}query PullsListSnapshot($q:String!${numbers.length ? ',$owner:String!,$repo:String!' : ''}) {
@@ -173,6 +229,7 @@ export async function fetchPullsListSnapshot(owner: any, repo: any, opts: any, f
     .filter(Boolean)
     .map((pr: any) => ({
       number: Number(pr.number),
+      ...mapListIndicators(pr),
       title: String(pr.title || ''),
       state: String(pr.state || '').toLowerCase() === 'open' ? 'open' : 'closed',
       merged: String(pr.state || '').toUpperCase() === 'MERGED',
@@ -214,7 +271,7 @@ export async function fetchDanglingPulls(owner: any, repo: any, numbers: any, fe
     }
   });
 
-  return settled.filter(Boolean);
+  return enrichPullsListIndicators(owner, repo, settled.filter(Boolean), fetchImpl, token, ctx);
 }
 
 /**

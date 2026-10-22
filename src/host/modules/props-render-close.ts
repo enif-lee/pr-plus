@@ -559,6 +559,14 @@
     }
     if (ac.signal.aborted || location.href !== pageUrl || !snapshot) return;
 
+    // Keep refreshed indicators in the tree cache as well as the native rows.
+    const app = (globalThis as any).__PR_TREE_APP__;
+    const cached = app?.getCachedPrs?.();
+    if (Array.isArray(cached) && typeof app?.replaceCachedPrs === 'function') {
+      const updates = new Map<number, any>((snapshot.prs || []).map((pr: any) => [Number(pr.number), pr]));
+      app.replaceCachedPrs(cached.map((pr: any) => ({ ...pr, ...(updates.get(Number(pr.number)) || {}) })), { owner, repo });
+    }
+
     const matched = new Set<number>(snapshot.matchedNumbers || []);
     // Search page truncated: fall back to state for the default open list
     const openOnly = /(^|\s)(is|state):open(\s|$)/i.test(

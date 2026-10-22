@@ -10,6 +10,8 @@ import vm from 'node:vm';
 import {
   buildPullsListSearchQuery,
   fetchPullsListSnapshot,
+  fetchOpenPullsPublic,
+  fetchDanglingPulls,
 } from '../src/fetch/pulls';
 
 function loadDomApi() {
@@ -71,6 +73,12 @@ describe('fetchPullsListSnapshot', () => {
             state: 'OPEN',
             isDraft: true,
             totalCommentsCount: 12,
+            author: { login: 'alice' }, viewerDidAuthor: true,
+            additions: 25, deletions: 4, changedFiles: 2,
+            statusCheckRollup: { state: 'FAILURE', contexts: { totalCount: 150,
+              checkRunCountsByState: [{ state: 'SUCCESS', count: 100 }, { state: 'FAILURE', count: 10 },
+                { state: 'SKIPPED', count: 10 }, { state: 'NEUTRAL', count: 10 }],
+              statusContextCountsByState: [{ state: 'SUCCESS', count: 15 }, { state: 'PENDING', count: 5 }] } },
             labels: { nodes: [{ name: 'bug', color: 'd73a4a', description: '' }] },
           },
           p8: {
@@ -111,6 +119,9 @@ describe('fetchPullsListSnapshot', () => {
       {
         number: 7,
         title: 'Renamed',
+        author: 'alice', viewerDidAuthor: true,
+        additions: 25, deletions: 4, changedFiles: 2, listChecksState: 'FAILURE',
+        listChecksPassed: 115, listChecksTotal: 150,
         state: 'open',
         merged: false,
         draft: true,
@@ -235,5 +246,65 @@ describe('applyListRowSnapshot / hideStaleListRow (React list rows)', () => {
     expect(row.hidden).toBe(true);
     expect(row.classList.contains('pr-tree-stale-row')).toBe(true);
     expect(api.hideStaleListRow(row)).toBe(false);
+  });
+});
+
+describe('list indicator enrichment', () => {
+  test('open list adds one batched scalar GraphQL query, preserving branch data', async () => {
+    const calls: any[] = [];
+    const fetchImpl = async (url: string, init: any) => {
+      calls.push({ url, init });
+      if (!init.body) return { ok: true, json: async () => [
+        { number: 1, user: { login: 'alice' }, head: { ref: 'feature' }, base: { ref: 'main' } },
+        { number: 2, user: { login: 'bob' } },
+      ] };
+      return { ok: true, headers: new Headers(), json: async () => ({ data: { repository: {
+        p1: { viewerDidAuthor: true, additions: 0, deletions: 0, changedFiles: 0, statusCheckRollup: null },
+        p2: { viewerDidAuthor: false, additions: 20, deletions: 3, changedFiles: 1, statusCheckRollup: { state: 'PENDING' } },
+      } } }) };
+    };
+    const prs = await fetchOpenPullsPublic('o', 'r', fetchImpl, 'token');
+    expect(calls).toHaveLength(2);
+    const query = JSON.parse(calls[1].init.body).query;
+    expect(query).toContain('p1:pullRequest(number:1)');
+    expect(query).toContain('p2:pullRequest(number:2)');
+    expect(query).toContain('checkRunCountsByState { state count }');
+    expect(query).toContain('statusContextCountsByState { state count }');
+    expect(query).not.toContain('nodes');
+    expect(query).not.toContain('edges');
+    expect(prs[0]).toMatchObject({ headRef: 'feature', baseRef: 'main', viewerDidAuthor: true,
+      additions: 0, deletions: 0, changedFiles: 0, listChecksState: null });
+    expect(prs[1].listChecksState).toBe('PENDING');
+  });
+
+  test('missing auth or failed enrichment preserves REST list without invented indicators', async () => {
+    for (const token of [null, 'token']) {
+      let calls = 0;
+      const fetchImpl = async (_url: string, init: any) => {
+        calls += 1;
+        if (init.body) throw new Error('GraphQL unavailable');
+        return { ok: true, json: async () => [{ number: 1, user: { login: 'alice' } }] };
+      };
+      const prs = await fetchOpenPullsPublic('o', 'r', fetchImpl, token);
+      expect(calls).toBe(token ? 2 : 1);
+      expect(prs[0].author).toBe('alice');
+      expect(prs[0].additions).toBeNull();
+      expect(prs[0]).not.toHaveProperty('listChecksState');
+      expect(prs[0]).not.toHaveProperty('viewerDidAuthor');
+    }
+  });
+
+  test('filtered / closed PRs fetched by number also get batched indicators', async () => {
+    const calls: any[] = [];
+    const fetchImpl = async (url: string, init: any) => {
+      calls.push(url);
+      return { ok: true, headers: new Headers(), json: async () => init.body
+        ? { data: { repository: { p7: { viewerDidAuthor: false, additions: 8,
+          deletions: 1, changedFiles: 1, statusCheckRollup: { state: 'SUCCESS' } } } } }
+        : { number: 7, user: { login: 'bob' } } };
+    };
+    const prs = await fetchDanglingPulls('o', 'r', [7], fetchImpl, 'token');
+    expect(calls).toHaveLength(2);
+    expect(prs[0]).toMatchObject({ additions: 8, listChecksState: 'SUCCESS', viewerDidAuthor: false });
   });
 });

@@ -211,9 +211,11 @@ function applyTreeIndents(doc: any, forest: any) {
     if (!used.has(row)) orderedRows.push(row);
   }
 
-  // Suppress observer noise is caller's job; still reorder in one pass.
-  for (const row of orderedRows) {
-    parent.appendChild(row);
+  // Moving an already ordered row detaches its focused checkbox. GitHub updates
+  // row classes on selection, so decoration repair must not move those rows.
+  for (let i = 0; i < orderedRows.length; i += 1) {
+    const current = [...parent.children].filter((el: any) => orderedRows.includes(el));
+    if (current[i] !== orderedRows[i]) parent.insertBefore(orderedRows[i], current[i] || null);
   }
 
   let applied = 0;
@@ -230,7 +232,7 @@ function applyTreeIndents(doc: any, forest: any) {
 }
 
 function clearTreeIndents(doc: any) {
-  const rows = [...doc.querySelectorAll(`.${PR_TREE_INDENT_CLASS}`)];
+  const rows = [...doc.querySelectorAll(`.${PR_TREE_INDENT_CLASS}, [data-pr-tree-depth]`)];
   const parent = rows[0]?.parentElement;
 
   if (parent && rows.length > 0) {
@@ -367,17 +369,11 @@ function detectReviewState(text: any) {
   return null;
 }
 
-function truncateBranchName(name: any, max: any = 24) {
-  if (!name || typeof name !== 'string') return '';
-  if (name.length <= max) return name;
-  return `${name.slice(0, max - 1)}…`;
-}
-
 /** Single muted gray chip: base ← head */
 function buildBranchBadge(doc: any, pr: any) {
   const badge = doc.createElement('span');
   badge.className = 'pr-tree-badge pr-tree-badge-branch';
-  const label = `${truncateBranchName(pr.baseRef)} ← ${truncateBranchName(pr.headRef)}`;
+  const label = `${pr.baseRef} ← ${pr.headRef}`;
   badge.textContent = label;
   badge.title = `${pr.baseRef} ← ${pr.headRef}`;
   badge.setAttribute('aria-label', `base ${pr.baseRef}, head ${pr.headRef}`);
@@ -433,6 +429,12 @@ function extractNativeMetaBits(nativeSecond: any, pr: any) {
   };
 }
 
+function listMessage(doc: any, key: string, substitutions?: any) {
+  const locale = doc.documentElement?.getAttribute('data-prp-app-locale') ||
+    doc.documentElement?.getAttribute('lang') || 'en';
+  return (globalThis as any).PRModalI18n?.formatMessage?.(key, locale, substitutions) || key;
+}
+
 /** "opened <relative-time> by author" from native row (or API author fallback). */
 function buildOpenedMeta(doc: any, pr: any, bits: any) {
   const wrap = doc.createElement('span');
@@ -464,6 +466,16 @@ function buildOpenedMeta(doc: any, pr: any, bits: any) {
     }
   }
 
+  if (pr.viewerDidAuthor === true) {
+    const author = wrap.querySelector('.pr-tree-author');
+    if (author) {
+      author.classList.add('pr-tree-author-self');
+      const marker = listMessage(doc, 'list_author_me');
+      author.appendChild(doc.createTextNode(` ${marker}`));
+      const label = author.getAttribute('aria-label');
+      if (label) author.setAttribute('aria-label', `${label} ${marker}`);
+    }
+  }
   return wrap;
 }
 
@@ -517,18 +529,79 @@ function appendMagicLinks(doc: any, parent: any, pr: any) {
   }
 }
 
+/** Compact totals share the lower metadata row's badge rules. */
+function buildRowChangeStats(doc: any, pr: any) {
+  if (!Number.isFinite(pr.additions) || !Number.isFinite(pr.deletions)) return null;
+  const stats = doc.createElement('span');
+  stats.className = 'pr-tree-badge pr-tree-change-stats';
+  for (const [kind, sign, value] of [['additions', '+', pr.additions], ['deletions', '−', pr.deletions]]) {
+    const count = doc.createElement('span');
+    count.className = `pr-tree-${kind}`;
+    count.textContent = `${sign}${value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : value}`;
+    count.title = `${sign}${value}`;
+    stats.appendChild(count);
+  }
+  return stats;
+}
+
 function fillMetaContent(doc: any, meta: any, pr: any, reviewState: any, nativeSecond: any) {
   const bits = extractNativeMetaBits(nativeSecond, pr);
-  meta.replaceChildren();
-  meta.appendChild(buildPrNumberEl(doc, pr));
-
+  const next = doc.createElement('div');
+  next.appendChild(buildPrNumberEl(doc, pr));
   const opened = buildOpenedMeta(doc, pr, bits);
-  if (opened) meta.appendChild(opened);
+  if (opened) next.appendChild(opened);
+  if (pr.draft) next.appendChild(buildDraftBadge(doc));
+  appendReviewBadge(doc, next, reviewState);
+  appendMagicLinks(doc, next, pr);
+  if (pr.baseRef && pr.headRef) next.appendChild(buildBranchBadge(doc, pr));
 
-  if (pr.draft) meta.appendChild(buildDraftBadge(doc));
-  appendReviewBadge(doc, meta, reviewState);
-  appendMagicLinks(doc, meta, pr);
-  if (pr.baseRef && pr.headRef) meta.appendChild(buildBranchBadge(doc, pr));
+  const state = String(pr.listChecksState || '').toUpperCase();
+  const kind = state === 'SUCCESS' ? 'success' :
+    ['FAILURE', 'ERROR'].includes(state) ? 'failure' :
+    ['PENDING', 'EXPECTED'].includes(state) ? 'pending' : null;
+  if (kind) {
+    const status = doc.createElement('span');
+    status.className = `pr-tree-badge pr-tree-checks pr-tree-checks-${kind}`;
+    const hasCounts = Number.isInteger(pr.listChecksPassed) && Number.isInteger(pr.listChecksTotal);
+    const label = hasCounts
+      ? listMessage(doc, 'list_checks_summary', { passed: pr.listChecksPassed, total: pr.listChecksTotal,
+          status: listMessage(doc, `list_checks_${kind}`) })
+      : listMessage(doc, `list_checks_${kind}`);
+    status.title = label;
+    status.setAttribute('role', 'img');
+    status.setAttribute('aria-label', label);
+    const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('aria-hidden', 'true');
+    // GitHub Primer Octicons (16px): check, x, dot-fill.
+    const paths = {
+      success: 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z',
+      failure: 'M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z',
+      pending: 'M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z',
+    };
+    const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', paths[kind]);
+    svg.appendChild(path);
+    status.appendChild(svg);
+    if (hasCounts) {
+      const counts = doc.createElement('span');
+      counts.textContent = `${pr.listChecksPassed}/${pr.listChecksTotal}`;
+      status.appendChild(counts);
+    }
+    next.appendChild(status);
+  }
+  const stats = buildRowChangeStats(doc, pr);
+  if (stats) next.appendChild(stats);
+  // Relative-time custom elements change their text after connecting. Compare
+  // the source snapshot, not the live children, to avoid observer rebuild loops.
+  const signature = next.innerHTML;
+  if (meta.__prTreeContent === signature) return false;
+  meta.__prTreeContent = signature;
+  meta.replaceChildren(...next.childNodes);
+  return true;
 }
 
 /**
@@ -539,6 +612,7 @@ function fillMetaContent(doc: any, meta: any, pr: any, reviewState: any, nativeS
  */
 function applyRowMeta(doc: any, row: any, pr: any) {
   if (!row || !pr) return false;
+  row.__prTreePr = pr;
 
   const host = findSecondColumnHost(row);
   if (!host) return false;
@@ -595,24 +669,8 @@ function refreshReviewBadges(doc: any, prs: any) {
       detectReviewState(row.textContent || '') ||
       '';
     const prev = meta.dataset[PR_TREE_REVIEW_STATE] || '';
-    const hasAuthor = Boolean(meta.querySelector('.pr-tree-author'));
-    const hasTime = Boolean(meta.querySelector('.pr-tree-relative-time, relative-time'));
-    const nativeHasAuthor = Boolean(
-      nativeSecond?.querySelector?.(
-        '.opened-by a, [data-testid="author-filter-link"]'
-      )
-    );
-    const nativeHasTime = Boolean(nativeSecond?.querySelector?.('relative-time'));
-    const needsAuthorTime = (nativeHasAuthor && !hasAuthor) || (nativeHasTime && !hasTime);
-
-    if (next && next === prev && !needsAuthorTime) continue;
-    if (!next && !needsAuthorTime && prev) {
-      // still refresh if only missing opened meta
-    }
-
-    if (next) meta.dataset[PR_TREE_REVIEW_STATE] = next;
-    fillMetaContent(doc, meta, pr, next || prev, nativeSecond);
-    updated += 1;
+    if (next && next !== prev) meta.dataset[PR_TREE_REVIEW_STATE] = next;
+    if (fillMetaContent(doc, meta, pr, next || prev, nativeSecond)) updated += 1;
   }
   return updated;
 }
@@ -635,6 +693,7 @@ function applyListDecorations(doc: any, prs: any) {
 }
 
 function clearListDecorations(doc: any) {
+  for (const stats of doc.querySelectorAll('.pr-tree-change-stats')) stats.remove();
   for (const meta of doc.querySelectorAll(`.${PR_TREE_META_CLASS}`)) {
     meta.remove();
   }
@@ -955,6 +1014,7 @@ function applyListRowSnapshot(doc: any, row: any, pr: any) {
   ) {
     changed = true;
   }
+  if (row.__prTreePr) applyRowMeta(doc, row, { ...row.__prTreePr, ...pr });
   return changed;
 }
 

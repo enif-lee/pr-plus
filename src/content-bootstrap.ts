@@ -301,6 +301,7 @@ function createPrTreeApp(deps: any) {
         }
         try {
           (toggleButton as any)?.rebindLocale?.();
+          if (currentPullsContext() && cachedPrs?.length) applyDecorations();
         } catch {
           /* ignore */
         }
