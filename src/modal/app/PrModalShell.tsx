@@ -2535,18 +2535,19 @@ export function PrModalApp({
       } catch {
         /* ignore */
       }
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
       setFileNav((prev) => {
         const next = { ...prev, width: clampFileNavWidth(prev.width) };
         persistFileNav(next);
         return next;
       });
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    // Embed hosts stop bubbling pointer events before they reach window.
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
   }
 
   function viewportSize() {
