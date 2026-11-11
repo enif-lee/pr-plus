@@ -12,6 +12,7 @@ import {
 function cacheWithBodies(sha: string) {
   return {
     headSha: sha,
+    baseSha: 'base', baseRef: 'main',
     changedFiles: 1,
     files: [
       {
@@ -37,7 +38,7 @@ describe('sameHeadSha / mayReuseFilesCommitsDiff', () => {
 
   test('same head + usable bodies → reuse files and commits', () => {
     const cache = cacheWithBodies('deadbeef01');
-    const live = { headSha: 'DEADBEEF01', changedFiles: 1 };
+    const live = { headSha: 'DEADBEEF01', baseSha: 'base', baseRef: 'main', changedFiles: 1 };
     const d = mayReuseFilesCommitsDiff(cache, live);
     expect(d.sameHead).toBe(true);
     expect(d.reuseFiles).toBe(true);
@@ -58,6 +59,7 @@ describe('sameHeadSha / mayReuseFilesCommitsDiff', () => {
   test('slim _patchOmitted files → no file reuse', () => {
     const cache = {
       headSha: 'cccc',
+      baseSha: 'base', baseRef: 'main',
       changedFiles: 1,
       files: [
         {
@@ -71,7 +73,7 @@ describe('sameHeadSha / mayReuseFilesCommitsDiff', () => {
       ],
       commits: [{ sha: 'c1' }],
     };
-    const d = mayReuseFilesCommitsDiff(cache, { headSha: 'cccc' });
+    const d = mayReuseFilesCommitsDiff(cache, { headSha: 'cccc', baseSha: 'base', baseRef: 'main' });
     expect(d.sameHead).toBe(true);
     expect(d.reuseFiles).toBe(false);
     expect(d.reuseCommits).toBe(true);
@@ -84,10 +86,21 @@ describe('sameHeadSha / mayReuseFilesCommitsDiff', () => {
     expect(d.reason).toBe('no-cache');
   });
 
-  test('provisional reuse when live head empty but cache has sha + bodies', () => {
+  test('unverified live comparison cannot settle cached files or commits', () => {
     const cache = cacheWithBodies('eeee');
     const d = mayReuseFilesCommitsDiff(cache, { headSha: null });
-    expect(d.sameHead).toBe(true);
-    expect(d.reuseFiles).toBe(true);
+    expect(d.sameHead).toBe(false);
+    expect(d.reuseFiles).toBe(false);
+    expect(d.reuseCommits).toBe(false);
+  });
+
+  test('base changes invalidate cached files and commits even with the same head', () => {
+    const cache = cacheWithBodies('head');
+    for (const live of [
+      { headSha: 'head', baseSha: 'other-base', baseRef: 'main' },
+      { headSha: 'head', baseSha: 'base', baseRef: 'release' },
+    ]) {
+      expect(mayReuseFilesCommitsDiff(cache, live)).toMatchObject({ reuseFiles: false, reuseCommits: false, reason: 'base-mismatch' });
+    }
   });
 });

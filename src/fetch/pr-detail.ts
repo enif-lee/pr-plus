@@ -54,7 +54,7 @@ import {
 export function mergeIssueIdentityIntoPull(pr: any, issue: any): any {
   if (!pr || !issue || typeof issue !== 'object') return pr;
   let next = pr;
-  if (issue.milestone) {
+  if (Object.prototype.hasOwnProperty.call(issue, 'milestone')) {
     next = { ...next, milestone: issue.milestone };
   }
   if (Array.isArray(issue.labels)) {
@@ -71,7 +71,6 @@ const stage1CoalesceMap = new Map<
   {
     promise: Promise<[any, any, any, any]>;
     timings: Record<string, any>;
-    timer: any;
   }
 >();
 
@@ -89,7 +88,8 @@ export async function fetchPrDetail(
   const fastIdentityOnly = Boolean(opts?.fastIdentityOnly);
   const retryMilestone = Boolean(opts?.retryMilestone);
   const coalesceKey =
-    opts?.coalesceKey && !retryMilestone ? String(opts.coalesceKey) : '';
+    opts?.coalesceKey && !retryMilestone
+      ? JSON.stringify([base, n, token || '', String(opts.coalesceKey)]) : '';
   const skipReviewThreads = fastIdentityOnly || Boolean(opts.skipReviewThreads);
   const threadsMaxPages = skipReviewThreads
     ? 0
@@ -174,25 +174,12 @@ export async function fetchPrDetail(
   } else if (coalesceKey) {
     stage1Timings = {};
     const p = runStage1(stage1Timings);
-    const timer = setTimeout(() => {
-      stage1CoalesceMap.delete(coalesceKey);
-    }, 5000);
-    try {
-      if (timer && typeof (timer as any).unref === 'function') {
-        (timer as any).unref();
-      }
-    } catch {
-      /* ignore */
-    }
-    stage1CoalesceMap.set(coalesceKey, {
-      promise: p,
-      timings: stage1Timings,
-      timer,
-    });
-    p.catch(() => {
-      clearTimeout(timer);
-      stage1CoalesceMap.delete(coalesceKey);
-    });
+    stage1CoalesceMap.set(coalesceKey, { promise: p, timings: stage1Timings });
+    // Share only in-flight work. A later open must perform a current read.
+    const release = () => {
+      if (stage1CoalesceMap.get(coalesceKey)?.promise === p) stage1CoalesceMap.delete(coalesceKey);
+    };
+    void p.then(release, release);
     stage1Promise = p;
   } else {
     stage1Promise = runStage1(timings);

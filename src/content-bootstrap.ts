@@ -60,6 +60,7 @@ function createPrTreeApp(deps: any) {
   let extrasTimer: any = null;
   let extrasAbort: AbortController | null = null;
   let dataGeneration = 0;
+  let refreshRequested = false;
 
   function cancelListExtras() {
     extrasGeneration += 1;
@@ -70,7 +71,7 @@ function createPrTreeApp(deps: any) {
   }
 
   function repoKey(owner: any, repo: any) {
-    return `${owner}/${repo}`;
+    return `${String(owner).toLowerCase()}/${String(repo).toLowerCase()}`;
   }
 
   function clearCache() {
@@ -86,7 +87,8 @@ function createPrTreeApp(deps: any) {
   /**
    * Patch one PR in the list cache (draft/title/state). Rebuilds forest + redecorates.
    */
-  function patchCachedPr(number: any, patch: any) {
+  function patchCachedPr(number: any, patch: any, opts: any = {}) {
+    if (opts.owner && opts.repo && cachedRepoKey !== repoKey(opts.owner, opts.repo)) return false;
     const n = Number(number);
     if (!Number.isFinite(n) || n <= 0 || !patch || typeof patch !== 'object') {
       return false;
@@ -99,6 +101,8 @@ function createPrTreeApp(deps: any) {
       return { ...p, ...patch, number: n };
     });
     if (!hit) return false;
+    // A request started before this acknowledgement must not undo the write.
+    dataGeneration += 1;
     try {
       cachedForest = buildPrTree(cachedPrs);
     } catch {
@@ -118,12 +122,14 @@ function createPrTreeApp(deps: any) {
   /**
    * Remove a PR from the list cache (merge/close). Rebuilds forest + redecorates.
    */
-  function removeCachedPr(number: any) {
+  function removeCachedPr(number: any, opts: any = {}) {
+    if (opts.owner && opts.repo && cachedRepoKey !== repoKey(opts.owner, opts.repo)) return false;
     const n = Number(number);
     if (!Number.isFinite(n) || n <= 0) return false;
     if (!Array.isArray(cachedPrs) || !cachedPrs.length) return false;
     const next = cachedPrs.filter((p) => !p || Number(p.number) !== n);
     if (next.length === cachedPrs.length) return false;
+    dataGeneration += 1;
     cachedPrs = next;
     try {
       cachedForest = cachedPrs.length ? buildPrTree(cachedPrs) : [];
@@ -146,10 +152,12 @@ function createPrTreeApp(deps: any) {
    */
   function replaceCachedPrs(prs: any, opts: any = {}) {
     if (!Array.isArray(prs)) return false;
-    dataGeneration += 1;
-    cancelListExtras();
     const o = String(opts?.owner || '').trim();
     const r = String(opts?.repo || '').trim();
+    const live = currentPullsContext();
+    if (o && r && live && live.key !== repoKey(o, r)) return false;
+    dataGeneration += 1;
+    cancelListExtras();
     if (o && r) {
       const key = repoKey(o, r);
       if (cachedRepoKey && cachedRepoKey !== key) {
@@ -454,12 +462,16 @@ function createPrTreeApp(deps: any) {
 
   async function loadPrData(repoInfo: any, pagePrNumbers: any) {
     const generation = dataGeneration;
+    const path = currentPullsContext()?.path;
     // API auth is applied in the background service worker only.
     const prs = await fetchOpenPulls(repoInfo.owner, repoInfo.repo, fetchImpl, {
       pagePrNumbers,
       includeAutolinks: false,
     });
-    if (generation !== dataGeneration) return false;
+    const live = currentPullsContext();
+    if (generation !== dataGeneration || !live || live.path !== path ||
+      live.key !== repoKey(repoInfo.owner, repoInfo.repo)) return false;
+    cancelListExtras();
     cachedPrs = prs;
     cachedForest = buildPrTree(cachedPrs);
     cachedRepoKey = repoKey(repoInfo.owner, repoInfo.repo);
@@ -470,6 +482,7 @@ function createPrTreeApp(deps: any) {
     const ctx = currentPullsContext();
     if (!ctx) {
       cancelListExtras();
+      refreshRequested = true;
       active = false;
       return;
     }
@@ -485,7 +498,8 @@ function createPrTreeApp(deps: any) {
     if (repoChanged) clearCache();
 
     // Full bootstrap when no cache, repo change, or first paint for this path without data.
-    if (needsFullLoad || (pathChanged && !cachedForest)) {
+    if (needsFullLoad || pathChanged || pageChanged || refreshRequested) {
+      if (pathChanged || pageChanged) refreshRequested = true;
       const result = await bootstrap();
       if (result.ok) {
         lastSyncedPath = path;
@@ -583,7 +597,8 @@ function createPrTreeApp(deps: any) {
         return { ok: false, reason: 'no-rows' };
       }
 
-      if (cachedRepoKey !== key || !cachedForest) {
+      if (cachedRepoKey !== key || !cachedForest || refreshRequested) {
+        refreshRequested = false;
         if (!await loadPrData(repoInfo, pagePrNumbers)) return { ok: false, reason: 'stale-data' };
       } else {
         // Same repo cache: still fill any page-only PRs.
@@ -631,6 +646,7 @@ function createPrTreeApp(deps: any) {
         repo: repoInfo,
       };
     } catch (err) {
+      refreshRequested = true;
       console.warn('[PR Tree] Failed to load PR data:', err);
       return { ok: false, reason: 'fetch-failed', error: err };
     } finally {
@@ -693,19 +709,22 @@ function createPrTreeApp(deps: any) {
     void hydrateTreeViewPref();
 
     const onNav = () => scheduleSync(50);
+    const onRefresh = () => {
+      if (!currentPullsContext()) return;
+      refreshRequested = true;
+      scheduleSync(50);
+    };
     window.addEventListener('popstate', onNav);
     window.addEventListener('hashchange', onNav);
     window.addEventListener('pr-tree-location', onNav);
-    window.addEventListener('turbo:load', onNav);
-    window.addEventListener('turbo:render', onNav);
-    window.addEventListener('turbo:frame-load', onNav);
+    window.addEventListener('turbo:load', onRefresh);
+    window.addEventListener('turbo:render', onRefresh);
+    window.addEventListener('turbo:frame-load', onRefresh);
     window.addEventListener('turbo:before-render', onNav);
-    window.addEventListener('pjax:complete', onNav);
-    window.addEventListener('pjax:end', onNav);
-    window.addEventListener('pageshow', onNav);
-    window.addEventListener('focus', () => {
-      if (currentPullsContext() && (needsReapply() || !active)) scheduleSync(0);
-    });
+    window.addEventListener('pjax:complete', onRefresh);
+    window.addEventListener('pjax:end', onRefresh);
+    window.addEventListener('pageshow', onRefresh);
+    window.addEventListener('focus', onRefresh);
 
     const unpatchHistory = patchHistoryNavigation();
 
@@ -730,6 +749,12 @@ function createPrTreeApp(deps: any) {
       disconnect() {
         cancelListExtras();
         observer.disconnect();
+        for (const event of ['popstate', 'hashchange', 'pr-tree-location', 'turbo:before-render']) {
+          window.removeEventListener(event, onNav);
+        }
+        for (const event of ['turbo:load', 'turbo:render', 'turbo:frame-load', 'pjax:complete', 'pjax:end', 'pageshow', 'focus']) {
+          window.removeEventListener(event, onRefresh);
+        }
         unpatchHistory();
         window.clearInterval(hrefPoll);
         clearTimeout(syncTimer);
@@ -753,6 +778,7 @@ function createPrTreeApp(deps: any) {
     replaceCachedPrs,
     getCachedForest: () => cachedForest,
     getCachedPrs: () => cachedPrs,
+    getCachedRepoKey: () => cachedRepoKey,
     isActive: () => active,
     isTreeModeEnabled: () => treeModeEnabled,
     getToggleButton: () => toggleButton,

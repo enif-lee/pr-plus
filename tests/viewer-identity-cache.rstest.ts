@@ -45,8 +45,9 @@ describe('plugin-wide viewer identity', () => {
     let release!: (value: { id: number; login: string }) => void;
     const pending = cache.get('github.com', 'pat', () => new Promise(resolve => { release = resolve; }));
     expect(await cache.peek('github.com', 'pat')).toBeNull();
-    // Allow digest/read setup to reach the held fetch without waiting on it.
-    await new Promise(resolve => setTimeout(resolve, 0));
+    // Digest/read setup can take multiple event-loop turns under suite load.
+    const deadline = Date.now() + 2000;
+    while (!release && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 1));
     release({ id: 1, login: 'alice' });
     await pending;
     expect(await cache.peek('github.com', 'pat')).toEqual({ id: 1, login: 'alice' });

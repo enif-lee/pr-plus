@@ -181,12 +181,8 @@
   let openPullsFetchGen = 0;
   /** @type {AbortController|null} */
   let openPullsFetchAbort: any = null;
-  /**
-   * PR numbers removed by local lifecycle (merge/close) for the current
-   * openPullsFetchedKey. Network open-list lag must not resurrect them.
-   * @type {Set<number>}
-   */
-  let openPullsTombstones = new Set();
+  let openPullsFetchKey = '';
+  let openPullsFetchPatches = new Map<number, any>();
   /** Default SWR age for open list (force always bypasses). */
   const OPEN_PULLS_MAX_AGE_MS = 30_000;
 
@@ -194,32 +190,26 @@
     return (globalThis as any).PRModalOpenPullsLifecycle || null;
   }
 
-  function resolveOpenPulls() {
+  function resolveOpenPulls(owner = current.owner, repo = current.repo) {
+    const key = `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}`;
     try {
       const app = (globalThis as any).__PR_TREE_APP__;
       const list = app?.getCachedPrs?.();
-      if (Array.isArray(list) && list.length) {
+      if (String(app?.getCachedRepoKey?.() || '').toLowerCase() === key && Array.isArray(list) && list.length) {
         return filterOpenPullsLocal(list);
       }
     } catch {
       /* ignore */
     }
-    if (Array.isArray(openPullsFetched) && openPullsFetched.length) {
+    if (openPullsFetchedKey === key && Array.isArray(openPullsFetched) && openPullsFetched.length) {
       return filterOpenPullsLocal(openPullsFetched);
     }
     return [];
   }
 
   function filterOpenPullsLocal(prs: any) {
-    const api = openPullsLifecycleApi();
-    if (typeof api?.filterOpenPullsByTombstones === 'function') {
-      return api.filterOpenPullsByTombstones(prs, openPullsTombstones);
-    }
-    if (!openPullsTombstones.size) {
-      return Array.isArray(prs) ? prs.slice() : [];
-    }
     return (Array.isArray(prs) ? prs : []).filter(
-      (p) => !p || !openPullsTombstones.has(Number(p.number))
+      (p: any) => p && p.merged !== true && String(p.state || '').toLowerCase() !== 'closed'
     );
   }
 
@@ -248,7 +238,6 @@
       /* ignore */
     }
     openPullsFetchAbort = null;
-    // Keep tombstones for same-repo lag protection until reopen clears them
   }
 
   /**
@@ -269,20 +258,9 @@
     const key = `${o.toLowerCase()}/${r.toLowerCase()}`;
     const life = openPullsLifecycleApi();
 
-    // Tombstones for force-fetch lag (pure policy)
-    if (typeof life?.nextOpenPullTombstones === 'function') {
-      openPullsTombstones = life.nextOpenPullTombstones(
-        openPullsTombstones,
-        n,
-        patch
-      );
-    } else {
-      const merged = patch?.merged === true;
-      const state = String(patch?.state || '').toLowerCase();
-      if (merged || state === 'closed') openPullsTombstones.add(n);
-      else if (state === 'open' && patch?.merged !== true) {
-        openPullsTombstones.delete(n);
-      }
+    // Only writes occurring during this request can override its response.
+    if (openPullsFetchP && openPullsFetchKey === key) {
+      openPullsFetchPatches.set(n, { ...openPullsFetchPatches.get(n), ...patch });
     }
 
     // Tree list (preferred by resolveOpenPulls)
@@ -294,13 +272,13 @@
           : patch?.merged === true ||
             String(patch?.state || '').toLowerCase() === 'closed';
       if (removes) {
-        app?.removeCachedPr?.(n);
+        app?.removeCachedPr?.(n, { owner: o, repo: r });
       } else if (typeof app?.patchCachedPr === 'function') {
         const field: Record<string, unknown> = {};
         if (typeof patch?.draft === 'boolean') field.draft = patch.draft;
         if (patch?.state != null) field.state = patch.state;
         if (typeof patch?.merged === 'boolean') field.merged = patch.merged;
-        if (Object.keys(field).length) app.patchCachedPr(n, field);
+        if (Object.keys(field).length) app.patchCachedPr(n, field, { owner: o, repo: r });
       }
     } catch {
       /* ignore */
@@ -374,7 +352,7 @@
     if (!o || !r) return Promise.resolve([]);
     const key = `${o.toLowerCase()}/${r.toLowerCase()}`;
     const force = Boolean(opts.force);
-    const cached = resolveOpenPulls();
+    const cached = resolveOpenPulls(o, r);
     const now = Date.now();
     const ageOk =
       openPullsFetchedKey === key &&
@@ -431,6 +409,9 @@
     }
 
     const fetchGen = ++openPullsFetchGen;
+    openPullsFetchKey = key;
+    const patches = new Map<number, any>();
+    openPullsFetchPatches = patches;
     openPullsFetchP = (async () => {
       try {
         if (ac?.signal?.aborted) return cached;
@@ -445,7 +426,7 @@
                 currentGen: openPullsFetchGen,
                 aborted: Boolean(ac?.signal?.aborted),
                 networkPrs: prs,
-                tombstones: openPullsTombstones,
+                tombstones: new Set(),
               })
             : {
                 ok:
@@ -455,7 +436,9 @@
                 prs: filterOpenPullsLocal(Array.isArray(prs) ? prs : []),
               };
         if (!decision.ok) return cached;
-        const next = decision.prs;
+        const next = filterOpenPullsLocal(decision.prs.map((pr: any) => ({
+          ...pr, ...(patches.get(Number(pr.number)) || {}),
+        })));
         openPullsFetched = next;
         openPullsFetchedKey = key;
         openPullsFetchedAt = Date.now();
@@ -492,7 +475,7 @@
     if (!Number.isFinite(n) || n <= 0) return null;
     const o = String(owner || '').toLowerCase();
     const r = String(repo || '').toLowerCase();
-    for (const p of resolveOpenPulls()) {
+    for (const p of resolveOpenPulls(owner, repo)) {
       if (!p || Number(p.number) !== n) continue;
       // List rows are for the current repo page; match number primarily
       if (p.owner && o && String(p.owner).toLowerCase() !== o) continue;
@@ -810,7 +793,8 @@
 
     const pageHasData = (p: any) =>
       (Array.isArray(p?.threads) && p.threads.length > 0) ||
-      (Array.isArray(p?.comments) && p.comments.length > 0);
+      (Array.isArray(p?.comments) && p.comments.length > 0) ||
+      (p?.totalCount === 0 && !p?.error && (p.source === 'graphql' || p.source === 'rest'));
 
     let page: any = null;
     let escalated = false;
@@ -922,15 +906,7 @@
     }
 
     if (!page) {
-      page = {
-        threads: [],
-        comments: [],
-        hasMore: false,
-        totalCount: 0,
-        pageCount: 0,
-        direction: 'newest',
-        source: null,
-      };
+      throw new Error('Review threads unavailable');
     }
 
     // Yield so ladder labels can paint. Prefer setTimeout over rAF — background

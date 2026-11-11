@@ -399,7 +399,7 @@ describe('architecture gates', () => {
     expect(fs.existsSync(path.join(root, 'src/modal/commands/domain-mutations.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/modal/app/domain-detail-context.tsx'))).toBe(true);
     const open = read('src/host/modules/open-modal-run.ts');
-    expect(open).toMatch(/mergeCommentsHostFirst/);
+    expect(open).not.toMatch(/reviewComments:\s*cleanedCacheRc/);
     expect(fs.existsSync(path.join(root, 'src/modal/commands/review-actions.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/modal/commands/side-actions.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'src/modal/hooks/useDomainDetailHost.ts'))).toBe(true);

@@ -162,18 +162,20 @@ function timelineItemMs(it: any): number {
  * Refresh the newest timeline window from network while keeping older
  * load-more history. Network is authoritative inside the fetched window:
  * bodies/edits win, in-window deletes drop, items older than the window stay.
- * Empty network (error / 0 rows) keeps prev so a failed refresh cannot wipe.
+ * Complete successful snapshots replace everything, including empty lists.
+ * Partial windows preserve only rows older than their verified coverage.
  */
 export function replaceNewestTimelineWindow(
   prevItems: any[],
   nextItems: any[],
-  opts: { sortNewest?: boolean } = {}
+  opts: { sortNewest?: boolean; complete?: boolean; coverageEndAt?: string | null } = {}
 ): any[] {
   const next = (Array.isArray(nextItems) ? nextItems : []).filter(Boolean);
   const prev = (Array.isArray(prevItems) ? prevItems : []).filter(Boolean);
-  if (!next.length) return prev.slice();
+  if (opts.complete) return next.slice();
+  if (!next.length && !opts.coverageEndAt) return prev.slice();
   const nextIds = new Set(next.map((it, i) => timelineItemKey(it, i)));
-  let windowMinMs = Infinity;
+  let windowMinMs = Date.parse(String(opts.coverageEndAt || '')) || Infinity;
   for (const it of next) {
     const ms = timelineItemMs(it);
     if (ms > 0 && ms < windowMinMs) windowMinMs = ms;

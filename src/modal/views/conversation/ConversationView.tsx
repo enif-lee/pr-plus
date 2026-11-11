@@ -8,6 +8,7 @@ import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
 import { AsideSection } from '@common/AsideSection';
+import { CommentsSummary } from './CommentsSummary';
 import { MarkdownComposer } from '@common/MarkdownComposer';
 import { MarkdownView } from '@common/MarkdownView';
 import { TipPopover } from '@common/TipPopover';
@@ -2757,6 +2758,9 @@ function ConversationViewImpl(props: any) {
               </>
             );
           })()}
+        </AsideSection>
+        <AsideSection title={t('meta_comments')} aria-label={t('meta_comments')}>
+          <CommentsSummary detail={detail} />
         </AsideSection>
         {showChecks || pendingChecks ? (
           <AsideSection title={t('meta_checks')} loading={pendingChecks && !showChecks}>

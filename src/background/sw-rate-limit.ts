@@ -211,7 +211,8 @@ export function wrapFetchWithRateLimit(baseFetch: any) {
     } catch (err) {
       return Promise.reject(err);
     }
-    const res = await baseFetch(url, init);
+    // GitHub PR state is mutable even when the URL/SHA is unchanged.
+    const res = await baseFetch(url, { ...init, cache: 'no-store' });
     try {
       noteGithubResponse(res, url, resource);
     } catch {

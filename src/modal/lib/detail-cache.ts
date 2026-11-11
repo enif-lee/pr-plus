@@ -105,6 +105,7 @@ export function createPersistedDetailCache(options: any = {}) {
   const ttlMs = Number.isFinite(options.ttlMs) ? options.ttlMs : 60_000;
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const memory = createDetailCache({ ttlMs, now });
+  let generation = 0;
 
   let idb: DetailIdbLike | null = null;
   if (options.idb === null) {
@@ -132,7 +133,10 @@ export function createPersistedDetailCache(options: any = {}) {
       return { value: null, fresh: false, stale: false, source: null };
     }
     try {
+      const startedAt = generation;
       const row = await idb.get(key);
+      // A delayed durable read cannot replace a network write or a clear.
+      if (generation !== startedAt) return memory.peek(key);
       if (!row || row.value == null) {
         return { value: null, fresh: false, stale: false, source: null };
       }
@@ -154,6 +158,7 @@ export function createPersistedDetailCache(options: any = {}) {
 
   function set(key: string, value: unknown, customTtlMs?: number) {
     if (!key) return;
+    generation += 1;
     const live = stripEphemeral(value);
     memory.set(key, live, customTtlMs);
     if (idb) {
@@ -169,6 +174,7 @@ export function createPersistedDetailCache(options: any = {}) {
   }
 
   function invalidate(key: string) {
+    generation += 1;
     memory.invalidate(key);
     if (idb && key) {
       void idb.delete(key).catch(() => {});
@@ -176,10 +182,12 @@ export function createPersistedDetailCache(options: any = {}) {
   }
 
   function clearMemory() {
+    generation += 1;
     memory.clear();
   }
 
   async function clear() {
+    generation += 1;
     memory.clear();
     if (idb) {
       try {

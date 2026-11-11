@@ -1,6 +1,6 @@
 {
   "name": "pr-plus",
-  "version": "1.12.5",
+  "version": "1.13.0",
   "private": true,
   "scripts": {
     "build:modal": "node scripts/build-modal.mjs",

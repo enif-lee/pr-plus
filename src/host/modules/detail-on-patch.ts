@@ -46,7 +46,20 @@
           if (touchesSupersede) {
             metaRefreshGen += 1;
           }
+          // Protect only responses that started before this confirmed write.
+          const sideKeys: Record<string, string[]> = {
+            comments: ['comments', 'commentsMeta', 'timelineEvents'], reviews: ['reviews'],
+            threads: ['reviewComments', 'reviewThreads', 'reviewThreadsMeta', 'viewerPendingReview'],
+            files: ['files', 'changedFiles'], commits: ['commits', 'commitsCount'],
+          };
+          current._sideWriteVersions ||= {};
+          for (const [side, keys] of Object.entries(sideKeys)) {
+            if (keys.some(k => Object.prototype.hasOwnProperty.call(patch, k))) {
+              current._sideWriteVersions[side] = (current._sideWriteVersions[side] || 0) + 1;
+            }
+          }
 
+          invalidateChangedComparison(patch);
           const next = {
             ...current.detail,
             ...patch,
@@ -90,20 +103,6 @@
           if (Object.prototype.hasOwnProperty.call(patch, 'milestone')) {
             next.milestone = patch.milestone == null ? null : patch.milestone;
           }
-          // Shield list→detail / revalidate from stale core that would flash then
-          // drop the just-written labels (and peers).
-          try {
-            if (typeof notePeopleMetaAuthority === 'function') {
-              notePeopleMetaAuthority(patch, {
-                owner: current.owner,
-                repo: current.repo,
-                number: current.number,
-              });
-            }
-          } catch {
-            /* ignore */
-          }
-
           if (S) {
             ensureDetailStore(next);
             // Meta from patch keys only — never re-stamp full merged detail meta.

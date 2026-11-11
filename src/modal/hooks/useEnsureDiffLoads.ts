@@ -155,6 +155,22 @@ useEffect(() => {
   tagsLoadGenRef.current += 1;
 }, [prIdentity]);
 
+useEffect(() => {
+  commitsFullyLoadedRef.current = false;
+  filesFullyLoadedRef.current = false;
+  commitsFlightRef.current = 0;
+  filesFlightRef.current = 0;
+  setCommitListLoading(false);
+  setFileListLoading(false);
+  useDetailUiStore.getState().setDiffLoading(false);
+  compareFetchGenRef.current += 1;
+  setDiffFilesOverride(null);
+  setDiffCommitFilter({ mode: 'all' });
+  setDiffCommitLoading(false);
+  setDiffCommitError(null);
+  setDiffCommitLabel(null);
+}, [prIdentity, detail?.headSha, detail?.baseSha, detail?.baseRef, detail?.headRef]);
+
 const ensureAllCommits = useCallback(async () => {
   if (!detail || typeof onFetchAllPrCommits !== 'function') return;
   if (commitsFullyLoadedRef.current || commitsFlightRef.current) return;
@@ -205,10 +221,11 @@ const ensureAllCommits = useCallback(async () => {
       setDiffCommitError(err?.message || String(err));
     }
   } finally {
-    if (commitsFlightRef.current === flight) {
+    const stillMine = commitsFlightRef.current === flight;
+    if (stillMine) {
       commitsFlightRef.current = 0;
     }
-    setCommitListLoading(false);
+    if (stillMine) setCommitListLoading(false);
   }
 }, [detail, onFetchAllPrCommits, onPatchDetail, prIdentity]);
 
@@ -283,7 +300,7 @@ const ensureAllFiles = useCallback(async () => {
     if (stillMine) {
       filesFlightRef.current = 0;
     }
-    setFileListLoading(false);
+    if (stillMine) setFileListLoading(false);
     if (stillMine) {
       useDetailUiStore.getState().setDiffLoading(false);
     }

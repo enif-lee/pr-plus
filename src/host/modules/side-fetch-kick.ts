@@ -36,7 +36,8 @@
     return !missingRequired;
   }
 
-  function kickIndependentSideFetches({ owner, repo, number, headSha = null, body = '', gen, stillOpenFn = null, signal = null, replaceNewestTimeline = false }: any) {
+  function kickIndependentSideFetches({ owner, repo, number, headSha = null, body = '', gen, stillOpenFn = null, signal = null, replaceNewestTimeline = false, coreVerified = false }: any) {
+    const writeVersions = { ...current._sideWriteVersions };
     const alive = () => {
       if (gen != null && gen !== detailFetchGen) return false;
       if (typeof stillOpenFn === 'function' && !stillOpenFn()) return false;
@@ -44,6 +45,11 @@
     };
     const settleSide = (key: any, partial: any) => {
       if (!alive()) return;
+      if ((current._sideWriteVersions?.[key] || 0) !== (writeVersions[key] || 0)) {
+        setSideFlag(key, { pending: false }, { render: false });
+        markSideProgress(key);
+        return;
+      }
       let applied = false;
       if (partial && typeof partial === 'object') {
         // Slice-only write — never spreads into other domains
@@ -158,7 +164,7 @@
     // Same headSha + usable Diff bodies → settle from cache (no re-fetch).
     // Slim IDB (`_patchOmitted`) or head mismatch → leave unsettled so
     // ensureAllFiles fetches patches.
-    if (claim('files')) {
+    if (coreVerified && claim('files')) {
       const snap = current.detail || null;
       const snapFiles = Array.isArray(snap?.files) ? snap.files : [];
       const idb =
@@ -169,6 +175,8 @@
         typeof idb?.mayReuseFilesCommitsDiff === 'function'
           ? idb.mayReuseFilesCommitsDiff(snap, {
               headSha: headSha || snap?.headSha || null,
+              baseSha: snap?.baseSha,
+              baseRef: snap?.baseRef,
               changedFiles: snap?.changedFiles,
             })
           : null;
@@ -340,7 +348,7 @@
             let startCursor = pi?.startCursor || null;
             let endCursor = pi?.endCursor || null;
             if (
-              (sinceWatermark || replaceNewestTimeline) &&
+              (sinceWatermark || (replaceNewestTimeline && hasMore)) &&
               sortNewest &&
               prevTl
             ) {
@@ -490,16 +498,25 @@
               let gqlEvents = Array.isArray(page?.timelineEvents)
                 ? page.timelineEvents
                 : [];
+              const graphqlCoverageEndAt = pure?.minTimelineCoverageEndAt?.(gqlComments, gqlEvents) || null;
               const restItems = Array.isArray(restPage?.items)
                 ? restPage.items
                 : Array.isArray(restPage)
                   ? restPage
                   : [];
+              const restComplete = restPage != null && Array.isArray(restPage.items) && restPage.meta?.hasMore === false;
               // Prefer union of GraphQL + REST comments by id.
               // mergeTimelineItemsById preserves GraphQL isMinimized when REST
               // omits Minimizable (otherwise hide state vanishes on refresh).
               let comments = gqlComments;
-              if (restItems.length) {
+              if (restComplete) {
+                const byId = new Map(gqlComments.map((c: any) => [String(c.id), c]));
+                comments = restItems.map((c: any) => {
+                  const previous = byId.get(String(c.id));
+                  return previous && pure?.mergeCommentMinimizeFields
+                    ? pure.mergeCommentMinimizeFields(previous, c) : c;
+                });
+              } else if (restItems.length) {
                 if (typeof pure?.mergeTimelineItemsById === 'function') {
                   comments = pure.mergeTimelineItemsById(
                     gqlComments,
@@ -535,13 +552,17 @@
                   ? current.detail.timelineEvents
                   : [];
                 if (typeof pure?.replaceNewestTimelineWindow === 'function') {
+                  const complete = !page.hasMore && !page.pageInfo?.hasPreviousPage && !page.pageInfo?.hasNextPage;
                   comments = pure.replaceNewestTimelineWindow(
                     prevComments,
-                    comments
+                    comments,
+                    { complete: complete || restComplete,
+                      coverageEndAt: pure.minTimelineCoverageEndAt?.(comments, []) || graphqlCoverageEndAt }
                   );
                   gqlEvents = pure.replaceNewestTimelineWindow(
                     prevEvents,
-                    gqlEvents
+                    gqlEvents,
+                    { complete, coverageEndAt: graphqlCoverageEndAt }
                   );
                 }
               }
@@ -612,7 +633,7 @@
                 paintHasMore = paintHasMore || Boolean(pi?.hasNextPage);
               }
               if (
-                (sinceWatermark || replaceNewestTimeline) &&
+                (sinceWatermark || (replaceNewestTimeline && paintHasMore)) &&
                 sortNewest &&
                 current.detail?.timelineMeta?.hasMore
               ) {
@@ -648,13 +669,7 @@
                 /* ignore */
               }
 
-              if (
-                page &&
-                !page.error &&
-                (comments.length > 0 ||
-                  gqlEvents.length > 0 ||
-                  (page.reviews || []).length > 0)
-              ) {
+              if (page && !page.error) {
                 paintTimelinePage(
                   {
                     comments,
@@ -812,7 +827,7 @@
 
     // Commits list deferred (aside first-open / Diff commit picker).
     // Reuse only when same headSha as seed/core and cache has commits.
-    if (claim('commits')) {
+    if (coreVerified && claim('commits')) {
       const snap = current.detail || null;
       const idb =
         typeof globalThis !== 'undefined'
@@ -822,6 +837,8 @@
         typeof idb?.mayReuseFilesCommitsDiff === 'function'
           ? idb.mayReuseFilesCommitsDiff(snap, {
               headSha: headSha || snap?.headSha || null,
+              baseSha: snap?.baseSha,
+              baseRef: snap?.baseRef,
             })
           : null;
       const canReuseCommits =
@@ -862,7 +879,7 @@
     }
 
     // checks needs headSha — may be claimed later when core paints with sha
-    if (headSha && claim('checks')) {
+    if (coreVerified && headSha && claim('checks')) {
       markPendingIfNeeded('checks');
       checksP =
         typeof api.fetchPrChecks === 'function'
@@ -871,6 +888,7 @@
               api
                 .fetchPrChecks(owner, repo, headSha, { signal })
                 .then((checks: any) => {
+                  if (headSha !== current.detail?.headSha) return checks;
                   settleSide('checks', {
                     checks: checks || {
                       state: 'unknown',
@@ -900,7 +918,7 @@
       if (current.sideSettled?.checks) creditSide('checks');
     }
 
-    if (claim('development')) {
+    if (coreVerified && claim('development')) {
       markPendingIfNeeded('development');
       developmentP =
         typeof api.fetchPrDevelopment === 'function'

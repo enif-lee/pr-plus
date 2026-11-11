@@ -137,7 +137,7 @@ export function filesListNeedsFullFetch(
   files: any,
   changedFiles?: number | null
 ): boolean {
-  if (!Array.isArray(files) || files.length === 0) return true;
+  if (!Array.isArray(files) || files.length === 0) return changedFiles !== 0;
   for (const f of files) {
     if (f && typeof f === 'object' && f._patchOmitted) return true;
   }
@@ -162,7 +162,7 @@ export function sameHeadSha(a: any, b: any): boolean {
 }
 
 export type FilesCommitsDiffReuseDecision = {
-  /** Cache and live/network share a non-empty head SHA (or provisional same). */
+  /** Cache and live/network share a non-empty head SHA. */
   sameHead: boolean;
   /** Reuse cached files[] including usable diff bodies — skip full files fetch. */
   reuseFiles: boolean;
@@ -174,11 +174,10 @@ export type FilesCommitsDiffReuseDecision = {
 
 /**
  * Decide whether cached files / commits / diff bodies may be reused without
- * re-fetch when the live/network core head SHA matches the cache.
+ * re-fetch when a fresh core verifies both base and head identities.
  *
  * @param cacheDetail cached or current detail snapshot
- * @param networkOrLive freshly loaded core (or seed with headSha); when null,
- *   cache is evaluated against its own headSha (provisional side-fetch kick)
+ * @param networkOrLive freshly loaded core; missing comparison fields disable reuse
  */
 export function mayReuseFilesCommitsDiff(
   cacheDetail: any,
@@ -217,10 +216,7 @@ export function mayReuseFilesCommitsDiff(
       reason: 'missing-head-sha',
     };
   }
-  // Provisional: cache has sha and live is empty (core still in flight) OR equal
-  const sameHead = Boolean(
-    cacheSha && (!liveSha || liveSha === cacheSha)
-  );
+  const sameHead = Boolean(cacheSha && liveSha && liveSha === cacheSha);
   if (!sameHead) {
     return {
       sameHead: false,
@@ -229,6 +225,13 @@ export function mayReuseFilesCommitsDiff(
       reason: 'cache-missing-sha',
     };
   }
+  const cacheBase = normalizeHeadSha(cache.baseSha);
+  const liveBase = normalizeHeadSha(live.baseSha);
+  if (!networkOrLive || !cacheBase || !liveBase || cacheBase !== liveBase ||
+    cache.baseRef !== live.baseRef) {
+    return { sameHead, reuseFiles: false, reuseCommits: false,
+      reason: cacheBase && liveBase ? 'base-mismatch' : 'unverified-comparison' };
+  }
 
   const files = Array.isArray(cache.files) ? cache.files : [];
   const commits = Array.isArray(cache.commits) ? cache.commits : [];
@@ -236,7 +239,7 @@ export function mayReuseFilesCommitsDiff(
     files.length > 0 &&
     filesListHasUsableDiffBodies(files) &&
     !files.some((f: any) => f && f._patchOmitted) &&
-    !filesListNeedsFullFetch(files, cache.changedFiles ?? live.changedFiles);
+    !filesListNeedsFullFetch(files, live.changedFiles ?? cache.changedFiles);
 
   const reuseFiles = filesUsable;
   const reuseCommits = commits.length > 0;

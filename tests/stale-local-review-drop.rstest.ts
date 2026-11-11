@@ -371,8 +371,7 @@ describe('mergeCoreWithCache cache reinject filter', () => {
       path.join(__dirname, '../src/host/modules/open-modal-run.ts'),
       'utf8'
     );
-    expect(src).toMatch(/cleanedCacheRc/);
-    expect(src).toMatch(/filterCacheReviewCommentsForCore|netHasPending/);
+    expect(src).not.toMatch(/reviewComments:\s*cleanedCacheRc/);
   });
 
   test('network without PENDING does not reinject discarded pending rows', () => {
@@ -536,8 +535,7 @@ describe('sanitizeDetailForCache drops orphan pending', () => {
       path.join(__dirname, '../src/host/modules/open-modal-run.ts'),
       'utf8'
     );
-    expect(open).toMatch(/PRModalDetailStore/);
-    expect(open).toMatch(/filterCacheReviewCommentsForCore/);
+    expect(open).not.toMatch(/reviewComments:\s*cleanedCacheRc/);
     expect(open).not.toMatch(/PRModalStaleLocalReview/);
   });
 });

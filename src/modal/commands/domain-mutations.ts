@@ -255,12 +255,6 @@ export function installPrModalMutations(d: Record<string, any>) {
       typeof nextOrUpdater === 'function' ? nextOrUpdater(base) : nextOrUpdater;
     if (!next) return { status: 'skipped' };
     const patch = pickDomainPatch(next, base);
-    if (!Object.keys(patch).length) {
-      // Full replace keys when updater returned whole detail without diffs detected
-      for (const k of DOMAIN_DETAIL_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(next, k)) patch[k] = next[k];
-      }
-    }
     if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewCommentIds')) {
       patch._deletedReviewCommentIds = next._deletedReviewCommentIds;
     }
@@ -783,13 +777,27 @@ export function installPrModalMutations(d: Record<string, any>) {
     if (!d.detail) return;
     const next = String(base || '').trim();
     if (!next || next === d.detail.baseRef) return;
+    const identity = d.prIdentity;
     d.setActionBusy(true);
     d.setActionMsg('');
     try {
       const api = globalThis.PRTreeFetch;
       if (!api?.updatePullRequest) throw new Error('Update PR API unavailable');
-      await api.updatePullRequest(d.detail.owner, d.detail.repo, d.detail.number, { base: next });
-      applyDomainDetail((prev: any) => (prev ? { ...prev, baseRef: next } : prev));
+      const result = await api.updatePullRequest(d.detail.owner, d.detail.repo, d.detail.number, { base: next });
+      if (d.prIdentity !== identity) return;
+      const patch = {
+        baseRef: result?.base?.ref || next,
+        ...(result?.base?.sha ? { baseSha: result.base.sha } : {}),
+      };
+      const apply = () => {
+        if (d.prIdentity === identity) {
+          const ack = patchHostDetail(patch);
+          if (ack.status === 'applied' && d.detailRef.current) {
+            d.detailRef.current = { ...d.detailRef.current, ...patch };
+          }
+        }
+      };
+      apply();
       d.setActionMsg(`Base branch changed to ${next}.`);
       await d.onRefresh?.();
     } catch (err) {

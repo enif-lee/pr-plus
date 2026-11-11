@@ -34,6 +34,7 @@ export async function fetchOpenPullsPublic(owner: any, repo: any, fetchImpl: any
   const url = githubRestUrl(`/repos/${owner}/${repo}/pulls?state=open&per_page=100`, ctx);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
+    cache: 'no-store',
   });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
@@ -57,6 +58,8 @@ export async function fetchPrHeadProbe(owner: any, repo: any, number: any, fetch
   const empty = {
     headSha: '',
     baseSha: '',
+    baseRef: '',
+    headRef: '',
     updatedAt: null as any,
     draft: false,
     state: '',
@@ -68,7 +71,7 @@ export async function fetchPrHeadProbe(owner: any, repo: any, number: any, fetch
       `/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/pulls/${n}`,
       ctx
     );
-    const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+    const res = await fetchImpl(url, { headers: buildApiHeaders(token), cache: 'no-store' });
     if (!res.ok) {
       const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
       err.status = res.status;
@@ -78,6 +81,8 @@ export async function fetchPrHeadProbe(owner: any, repo: any, number: any, fetch
     return {
       headSha: String(data?.head?.sha || ''),
       baseSha: String(data?.base?.sha || ''),
+      baseRef: String(data?.base?.ref || ''),
+      headRef: String(data?.head?.ref || ''),
       updatedAt: data?.updated_at || null,
       draft: Boolean(data?.draft),
       state: String(data?.state || ''),
@@ -99,6 +104,7 @@ export async function fetchPullByNumber(owner: any, repo: any, pullNumber: any, 
   const url = githubRestUrl(`/repos/${owner}/${repo}/pulls/${pullNumber}`, ctx);
   const res = await fetchImpl(url, {
     headers: buildApiHeaders(token),
+    cache: 'no-store',
   });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText} (PR #${pullNumber})`);
@@ -219,7 +225,7 @@ export async function fetchPullsListSnapshot(owner: any, repo: any, opts: any, f
     .join('\n    ');
   // Fragment first: apiGraphql injects rateLimit before the document's last `}`
   const query = `${numbers.length ? `fragment ListRowPr on PullRequest {
-  number title state isDraft totalCommentsCount
+  number title state isDraft totalCommentsCount baseRefName headRefName baseRefOid headRefOid
   ${LIST_INDICATOR_FIELDS}
   labels(first:20) { nodes { name color description } }
 }
@@ -248,6 +254,10 @@ export async function fetchPullsListSnapshot(owner: any, repo: any, opts: any, f
     .filter(Boolean)
     .map((pr: any) => ({
       number: Number(pr.number),
+      baseRef: pr.baseRefName,
+      headRef: pr.headRefName,
+      baseSha: pr.baseRefOid,
+      headSha: pr.headRefOid,
       ...mapListIndicators(pr),
       title: String(pr.title || ''),
       state: String(pr.state || '').toLowerCase() === 'open' ? 'open' : 'closed',

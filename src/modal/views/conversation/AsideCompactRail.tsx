@@ -6,6 +6,7 @@ import { buildUnifiedReviewerRows } from '@lib/searchable-select';
 import { reviewStatusTone } from '@common/utils';
 import { hasChecksData } from './ChecksPanel';
 import { buildCheckStackGroups, ChecksSummary } from './ChecksSummary';
+import { CommentsSummary } from './CommentsSummary';
 import '../../components/common/AvatarStack.css';
 
 /**
@@ -284,6 +285,7 @@ export function AsideCompactRail({
     (Array.isArray(detail?.files) ? detail.files.length : 0);
 
   const hasAnything =
+    Boolean(detail) ||
     reviewers.length > 0 ||
     assignees.length > 0 ||
     showChecks ||
@@ -322,6 +324,11 @@ export function AsideCompactRail({
           <AvatarStack people={assignees} />
         </section>
       ) : null}
+
+      <section className="prp-aside-compact__group" aria-label={t('meta_comments')}>
+        <h3 className="prp-aside-compact__label">{t('meta_comments')}</h3>
+        <CommentsSummary detail={detail} compact />
+      </section>
 
       {showChecks ? (
         <section className="prp-aside-compact__group" aria-label={t('meta_checks')}>

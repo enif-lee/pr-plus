@@ -324,99 +324,25 @@
     return current.detail;
   }
 
-  /**
-   * Record a confirmed App meta write so later open/revalidate core GETs cannot
-   * clobber labels (etc.) while GitHub/cache is still stale.
-   */
-  function notePeopleMetaAuthority(patch: any, identity: any = null) {
-    const S = detailStoreApi();
-    const build =
-      typeof S?.buildPeopleMetaAuthority === 'function'
-        ? S.buildPeopleMetaAuthority
-        : null;
-    if (!build) {
-      // Fallback: minimal stamp when pure module lags rebuild
-      if (!patch || typeof patch !== 'object') return;
-      const keys = ['labels', 'assignees', 'requestedReviewers', 'milestone'];
-      const fields: any = {};
-      for (const k of keys) {
-        if (Object.prototype.hasOwnProperty.call(patch, k)) fields[k] = patch[k];
-      }
-      if (!Object.keys(fields).length) return;
-      const owner = identity?.owner ?? current.owner;
-      const repo = identity?.repo ?? current.repo;
-      const number = identity?.number ?? current.number;
-      const n = Number(number);
-      if (!Number.isFinite(n) || n <= 0) return;
-      lastPeopleMetaAuthority = {
-        owner: String(owner || '').toLowerCase(),
-        repo: String(repo || '').toLowerCase(),
-        number: n,
-        gen: metaRefreshGen,
-        at: Date.now(),
-        fields: {
-          ...(lastPeopleMetaAuthority &&
-          Number(lastPeopleMetaAuthority.number) === n
-            ? lastPeopleMetaAuthority.fields
-            : {}),
-          ...fields,
-        },
-      };
-      persistPeopleMetaAuthority(lastPeopleMetaAuthority);
-      return;
-    }
-    const owner = identity?.owner ?? current.owner;
-    const repo = identity?.repo ?? current.repo;
-    const number = identity?.number ?? current.number;
-    const base =
-      lastPeopleMetaAuthority &&
-      Number(lastPeopleMetaAuthority.number) === Number(number)
-        ? { ...lastPeopleMetaAuthority.fields }
-        : {};
-    const nextPatch = { ...base, ...patch };
-    const auth = build(
-      { owner, repo, number },
-      nextPatch,
-      { gen: metaRefreshGen, at: Date.now() }
+  /** Diff and commit lists belong to a base/head comparison, not just a PR. */
+  function invalidateChangedComparison(next: any) {
+    const prev = current.detail;
+    if (!prev || !next) return;
+    const changed = ['baseRef', 'baseSha', 'headRef', 'headSha'].some(
+      k => Object.prototype.hasOwnProperty.call(next, k) && next[k] !== prev[k]
     );
-    if (auth) {
-      lastPeopleMetaAuthority = auth;
-      persistPeopleMetaAuthority(auth);
-    }
-  }
-
-  /** Prefer last write-through people meta over a stale core GET. */
-  function withPeopleMetaAuthority(coreFlat: any) {
-    // Hydrate from sessionStorage if memory was wiped (force-close without host
-    // closeModal, or a new content-script world). Soft reopen e2e relies on this.
-    if (!lastPeopleMetaAuthority) {
-      lastPeopleMetaAuthority = loadPeopleMetaAuthorityFromSession();
-    }
+    if (!changed) return;
     const S = detailStoreApi();
-    const apply =
-      typeof S?.applyPeopleMetaAuthorityToCore === 'function'
-        ? S.applyPeopleMetaAuthorityToCore
-        : null;
-    if (!apply || !lastPeopleMetaAuthority || !coreFlat) return coreFlat;
-    const { flat, fullyMatched } = apply(
-      coreFlat,
-      lastPeopleMetaAuthority,
-      {
-        owner: current.owner,
-        repo: current.repo,
-        number: current.number,
-      }
-    );
-    // Keep authority for a short window after network matches so a subsequent
-    // lagging null core cannot wipe the just-set milestone (soft reopen).
-    if (fullyMatched) {
-      const age = Date.now() - Number(lastPeopleMetaAuthority.at || 0);
-      if (age > 30_000) {
-        lastPeopleMetaAuthority = null;
-        persistPeopleMetaAuthority(null);
-      }
+    ensureDetailStore(prev);
+    if (S && current.detailStore) {
+      S.applyFiles(current.detailStore, [], { settled: false });
+      S.applyCommits(current.detailStore, [], { settled: false });
+      publishDetailFromStore();
     }
-    return flat || coreFlat;
+    for (const key of ['files', 'commits', 'checks', 'development']) {
+      current._sideKickStarted?.delete?.(key);
+      setSideFlag(key, { pending: false, settled: false }, { render: false });
+    }
   }
 
   function applyCoreToStore(coreFlat: any, opts: any = null) {
@@ -427,12 +353,11 @@
         : null;
     const skipSupersedeMeta =
       metaGenAtStart != null && metaGenAtStart !== metaRefreshGen;
-    const trustNetworkMeta = Boolean(opts?.trustNetworkMeta);
-    // Session write-through shield (labels flash-then-gone on list→detail).
-    // Manual/auto refresh asks for GitHub's current chips — do not overlay.
-    let core = trustNetworkMeta
-      ? coreFlat
-      : withPeopleMetaAuthority(coreFlat);
+    let core = coreFlat;
+    if (opts?.threadWriteVersion != null && opts.threadWriteVersion !== (current._sideWriteVersions?.threads || 0)) {
+      core = { ...coreFlat };
+      for (const key of ['viewerPendingReview', 'reviewThreads', 'reviewComments', 'reviewThreadsMeta', 'reviewCommentsMeta']) delete core[key];
+    }
     if (!S) {
       let progressive = core;
       if (skipSupersedeMeta) {
@@ -444,32 +369,10 @@
       return setDetailProgressive(progressive);
     }
     ensureDetailStore(current.detail);
+    invalidateChangedComparison(skipSupersedeMeta ? S.stripSupersededMetaFields(core) : core);
     S.applyCorePayload(current.detailStore, core, {
       skipSupersedeMeta,
     });
-    // Re-assert people-meta authority after core apply. Lagging REST null
-    // milestone/labels must not stick when App just write-through confirmed.
-    // Skip on explicit refresh so an external chip edit is not overwritten.
-    try {
-      if (
-        !trustNetworkMeta &&
-        lastPeopleMetaAuthority &&
-        Number(lastPeopleMetaAuthority.number) === Number(current.number) &&
-        lastPeopleMetaAuthority.fields &&
-        typeof S.applyMeta === 'function'
-      ) {
-        const age = Date.now() - Number(lastPeopleMetaAuthority.at || 0);
-        if (age >= 0 && age < 120_000) {
-          S.applyMeta(current.detailStore, lastPeopleMetaAuthority.fields, {
-            trustEmpty: true,
-            source: 'people-meta-authority-reassert',
-            sketch: false,
-          });
-        }
-      }
-    } catch {
-      /* ignore */
-    }
     return publishDetailFromStore();
   }
 
@@ -516,7 +419,8 @@
     return publishDetailFromStore();
   }
 
-  function applyThreadsToStore(mergedFlat: any) {
+  function applyThreadsToStore(mergedFlat: any, writeVersion: number | null = null) {
+    if (writeVersion != null && writeVersion !== (current._sideWriteVersions?.threads || 0)) return current.detail;
     const S = detailStoreApi();
     if (!S) {
       // No store API: merge threads fields only when possible

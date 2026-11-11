@@ -79,8 +79,8 @@ describe('estimateListCommentCount', () => {
   });
 });
 
-describe('updateListRowCommentCount refuses downgrade', () => {
-  test('does not lower an existing painted count', () => {
+describe('updateListRowCommentCount reflects remote totals', () => {
+  test('lowers an existing count when comments were deleted', () => {
     const api = loadDomApi();
     const html = `<!DOCTYPE html><html><body>
       <div class="js-navigation-container">
@@ -95,10 +95,10 @@ describe('updateListRowCommentCount refuses downgrade', () => {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     const ok = api.updateListRowCommentCount(doc, 7, 0);
-    expect(ok).toBe(false);
-    expect(doc.querySelector('span')?.textContent).toBe('9');
+    expect(ok).toBe(true);
+    expect(doc.querySelector('span')?.textContent).toBe('0');
     expect(doc.querySelector('a')?.getAttribute('aria-label')).toBe(
-      '9 comments'
+      '0 comments'
     );
     // Higher counts still apply
     expect(api.updateListRowCommentCount(doc, 7, 11)).toBe(true);

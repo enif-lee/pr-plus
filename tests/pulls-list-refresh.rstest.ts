@@ -71,6 +71,8 @@ describe('fetchPullsListSnapshot', () => {
         repository: {
           p7: {
             number: 7,
+            baseRefName: 'stack/root', headRefName: 'stack/child',
+            baseRefOid: 'base-sha', headRefOid: 'head-sha',
             title: 'Renamed',
             state: 'OPEN',
             isDraft: true,
@@ -106,6 +108,7 @@ describe('fetchPullsListSnapshot', () => {
     expect(calls[0].body.variables.q).toBe('repo:o/r is:pr is:open');
     expect(calls[0].body.query).toContain('p7: pullRequest(number:7)');
     expect(calls[0].body.query).toContain('p8: pullRequest(number:8)');
+    expect(calls[0].body.query).toContain('baseRefName headRefName baseRefOid headRefOid');
     expect(calls[0].body.query).not.toContain('pullRequest(number:NaN)');
     // rateLimit is injected into the query operation, not the row fragment
     const sent = calls[0].body.query;
@@ -120,6 +123,7 @@ describe('fetchPullsListSnapshot', () => {
     expect(snap.prs).toEqual([
       {
         number: 7,
+        baseRef: 'stack/root', headRef: 'stack/child', baseSha: 'base-sha', headSha: 'head-sha',
         title: 'Renamed',
         author: 'alice', viewerDidAuthor: true,
         additions: 25, deletions: 4, changedFiles: 2, listChecksState: 'FAILURE',
@@ -210,12 +214,12 @@ describe('applyListRowSnapshot / hideStaleListRow (React list rows)', () => {
     expect(row.querySelector('.metadata').textContent.trim()).toBe('6');
   });
 
-  test('never lowers the React text-node comment count', () => {
+  test('reflects remote comment deletions in the React text-node count', () => {
     const api = loadDomApi();
     const doc = new JSDOM(reactListHtml()).window.document;
     const row = api.findListRowByNumber(doc, 8);
     api.applyListRowSnapshot(doc, row, { number: 8, listCommentCount: 2 });
-    expect(row.querySelector('.metadata').textContent.trim()).toBe('4');
+    expect(row.querySelector('.metadata').textContent.trim()).toBe('2');
   });
 
   test('rebuilds chips in the badges container when labels changed', () => {

@@ -229,6 +229,9 @@ export async function fetchReviewThreadsPage(
       ctx
     );
     const conn = data?.repository?.pullRequest?.reviewThreads;
+    if (!conn || !Array.isArray(conn.nodes) || !conn.pageInfo) {
+      throw new Error('Review threads connection unavailable');
+    }
     const nodes = conn?.nodes || [];
     const pageInfo = conn?.pageInfo || {};
     const mapped = mapReviewThreadNodes(nodes);

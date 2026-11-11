@@ -176,7 +176,9 @@ export const SUPERSEDES_META_REFRESH_KEYS = [
   'state',
   'merged',
   'baseRef',
+  'baseSha',
   'subscribed',
+  'bodyReactions',
 ] as const;
 
 export function patchTouchesSupersedeMeta(
@@ -738,19 +740,6 @@ export function applyMeta(store: any, metaPartial: any, opts: ApplyOpts = {}) {
     ) {
       continue;
     }
-    // Lagging network core often reports milestone:null right after a modal set.
-    // Keep a non-null store milestone unless the write is an explicit App patch
-    // clear (source=patch with null). Soft reopen: GH has board, pull lags.
-    if (
-      k === 'milestone' &&
-      v == null &&
-      next[k] != null &&
-      opts.trustEmpty &&
-      opts.source &&
-      String(opts.source).startsWith('network')
-    ) {
-      continue;
-    }
     next[k] = v;
   }
   store.meta = next;
@@ -1281,33 +1270,6 @@ export function applyCorePayload(store: any, coreFlat: any, opts: ApplyOpts = {}
     sketch: false,
     trustEmpty: true,
   });
-  // Always force non-empty branch refs from network core (authoritative REST).
-  // Covers cold open from URL (no list sketch branches) and failed soft-refresh.
-  try {
-    const branchForce: Record<string, any> = {};
-    for (const k of [
-      'baseRef',
-      'headRef',
-      'baseSha',
-      'headSha',
-      'baseOwner',
-      'baseRepo',
-      'headOwner',
-      'headRepo',
-    ] as const) {
-      const v = (coreFlat as any)[k];
-      if (v != null && String(v).trim() !== '') branchForce[k] = v;
-    }
-    if (Object.keys(branchForce).length) {
-      applyMeta(store, branchForce, {
-        source: 'network-core-branches',
-        sketch: false,
-        trustEmpty: true,
-      });
-    }
-  } catch {
-    /* ignore */
-  }
   if (coreFlat.viewerPendingReview !== undefined) {
     applyPendingReview(store, coreFlat.viewerPendingReview);
     store.dropPending = false;

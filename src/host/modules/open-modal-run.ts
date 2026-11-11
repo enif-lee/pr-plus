@@ -14,6 +14,8 @@
     try {
       if (
         current?.open &&
+        String(current.owner).toLowerCase() === String(owner).toLowerCase() &&
+        String(current.repo).toLowerCase() === String(repo).toLowerCase() &&
         Number(current.number) === Number(number) &&
         current.detail &&
         typeof current.detail === 'object'
@@ -24,109 +26,8 @@
       /* ignore */
     }
     const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
-    try {
-      if (
-        (!lastPeopleMetaAuthority ||
-          Number(lastPeopleMetaAuthority.number) !== Number(number)) &&
-        typeof loadPeopleMetaAuthorityFromSession === 'function'
-      ) {
-        const hydrated = loadPeopleMetaAuthorityFromSession();
-        if (hydrated && Number(hydrated.number) === Number(number)) {
-          lastPeopleMetaAuthority = hydrated;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    // waiting on lagging REST.
-    try {
-      if (typeof loadPeopleMetaAuthorityFromChromeSession === 'function') {
-        const openGenSnap = detailFetchGen;
-        void loadPeopleMetaAuthorityFromChromeSession().then((chromeAuth) => {
-          try {
-            if (
-              openGenSnap !== detailFetchGen ||
-              !current.open ||
-              Number(current.number) !== Number(number)
-            ) {
-              return;
-            }
-            if (
-              !chromeAuth ||
-              Number(chromeAuth.number) !== Number(number)
-            ) {
-              return;
-            }
-            lastPeopleMetaAuthority = chromeAuth;
-            try {
-              persistPeopleMetaAuthority(chromeAuth);
-            } catch {
-              /* ignore */
-            }
-            const S = detailStoreApi();
-            const fields = chromeAuth.fields || {};
-            if (
-              S?.applyMeta &&
-              current.detailStore &&
-              fields &&
-              Object.keys(fields).length
-            ) {
-              S.applyMeta(current.detailStore, fields, {
-                trustEmpty: true,
-                source: 'people-meta-authority-chrome-session',
-                sketch: false,
-              });
-              publishDetailFromStore();
-              render();
-              console.log(
-                `[pr-plus] openModal people-meta chrome.session hydrate ${owner}/${repo}#${number} ` +
-                  `ms=${fields.milestone?.title || fields.milestone?.number || '—'}`
-              );
-            }
-          } catch {
-            /* ignore */
-          }
-        });
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (
-        typeof lastPeopleMetaAuthority !== 'undefined' &&
-        lastPeopleMetaAuthority &&
-        Number(lastPeopleMetaAuthority.number) === Number(number)
-      ) {
-        const fields = lastPeopleMetaAuthority.fields || {};
-        const nextFields: Record<string, unknown> = { ...fields };
-        let changed = false;
-        for (const k of Object.keys(nextFields)) {
-          const v = nextFields[k];
-          const empty =
-            k === 'milestone'
-              ? v == null
-              : Array.isArray(v)
-                ? v.length === 0
-                : !v;
-          if (empty) {
-            delete nextFields[k];
-            changed = true;
-          }
-        }
-        if (changed) {
-          lastPeopleMetaAuthority = Object.keys(nextFields).length
-            ? { ...lastPeopleMetaAuthority, fields: nextFields }
-            : null;
-          if (typeof persistPeopleMetaAuthority === 'function') {
-            persistPeopleMetaAuthority(lastPeopleMetaAuthority);
-          }
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-
-    void ensureOpenPullsForStack(owner, repo, { signal });
+    const threadWriteVersion = 0;
+    void ensureOpenPullsForStack(owner, repo, { signal, force: true });
 
     const pathTarget = parsePrPagePath(
       typeof location !== 'undefined' ? location.pathname : ''
@@ -194,42 +95,6 @@
     let fromCache = firstPaint.source === 'memory' && Boolean(cached);
     const fromList = firstPaint.source === 'list-sketch';
     let initialDetail = firstPaint.detail || null;
-    try {
-      if (
-        typeof lastPeopleMetaAuthority !== 'undefined' &&
-        lastPeopleMetaAuthority &&
-        Number(lastPeopleMetaAuthority.number) === Number(number)
-      ) {
-        const fields = lastPeopleMetaAuthority.fields || {};
-        if (fields && typeof fields === 'object' && Object.keys(fields).length) {
-          if (!initialDetail) {
-            initialDetail = {
-              owner: String(owner || ''),
-              repo: String(repo || ''),
-              number: Number(number),
-              title: '',
-              body: '',
-              labels: [],
-              assignees: [],
-              requestedReviewers: [],
-              milestone: null,
-              _sketch: true,
-              _source: 'people-meta-authority',
-              ...fields,
-            };
-          } else {
-            initialDetail = {
-              ...initialDetail,
-              ...fields,
-              _sketch: initialDetail._sketch,
-            };
-          }
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-
     const ghLoc =
       isEmbedPresentation(resolvedPresentation) ||
       (pathTarget &&
@@ -397,6 +262,7 @@
     }
 
 
+    const initialPaintDetail = current.detail;
     const idbHydrateP = !fromCache
       ? peekDetailIdb(key).then((idbPeek) => {
           if (gen !== detailFetchGen) return null;
@@ -410,6 +276,7 @@
           ) {
             return null;
           }
+          if (current.detail !== initialPaintDetail) return null;
           const v = idbPeek?.value || null;
           if (!v) return null;
           const pickIdb =
@@ -536,7 +403,6 @@
       /** @type {any} */
       let earlyThreadsPage: any = null;
       let corePainted = false;
-      let fastCorePainted = false;
       let threadsPaintedEarly = false;
 
       /** Merge SWR preserve fields from cache into network core detail. */
@@ -568,77 +434,6 @@
                 reason: sameHead ? 'reuse' : 'head-mismatch',
               };
 
-        // Host set-authority for reviewComments vs IDB cache.
-        const pureStore =
-          typeof globalThis !== 'undefined'
-            ? (globalThis as any).PRModalDetailStore
-            : null;
-        const netRc = Array.isArray(detail.reviewComments)
-          ? detail.reviewComments
-          : [];
-        const cacheRc = Array.isArray(cacheSnap?.reviewComments)
-          ? cacheSnap.reviewComments
-          : [];
-        if (cacheSnap && cacheRc.length) {
-          if (netRc.length) {
-            // Settled host list: cache-only ids drop; host fields win.
-            const mergeFn =
-              typeof pureStore?.mergeCommentsHostFirst === 'function'
-                ? pureStore.mergeCommentsHostFirst
-                : null;
-            const mergedRc = mergeFn
-              ? mergeFn(netRc, cacheRc, {
-                  hostAuthoritative: true,
-                  networkDetail: detail,
-                })
-              : netRc;
-            detail = { ...detail, reviewComments: mergedRc };
-          } else {
-            // Empty network window: only reinject when network still has PENDING
-            // (attach race). Else GraphQL threads side-fetch is SoT.
-            const netHasPending =
-              typeof pureStore?.detailHasViewerPending === 'function'
-                ? pureStore.detailHasViewerPending(detail)
-                : Boolean(detail?.viewerPendingReview?.id);
-            if (netHasPending) {
-              const filterFn =
-                typeof pureStore?.filterCacheReviewCommentsForCore ===
-                'function'
-                  ? pureStore.filterCacheReviewCommentsForCore
-                  : null;
-              const netWithTombstones = {
-                ...detail,
-                _deletedReviewCommentIds: [
-                  ...(Array.isArray(detail?._deletedReviewCommentIds)
-                    ? detail._deletedReviewCommentIds
-                    : []),
-                  ...(Array.isArray(cacheSnap?._deletedReviewCommentIds)
-                    ? cacheSnap._deletedReviewCommentIds
-                    : []),
-                ],
-              };
-              const cleanedCacheRc = filterFn
-                ? filterFn(cacheRc, netWithTombstones)
-                : cacheRc.filter((c: any) => c && c.id != null);
-              if (cleanedCacheRc.length) {
-                detail = {
-                  ...detail,
-                  reviewComments: cleanedCacheRc,
-                  reviewThreads:
-                    cacheSnap.reviewThreads || detail.reviewThreads,
-                  reviewThreadsMeta:
-                    cacheSnap.reviewThreadsMeta || detail.reviewThreadsMeta,
-                  reviewCommentsMeta:
-                    cacheSnap.reviewCommentsMeta || detail.reviewCommentsMeta,
-                  comments:
-                    Array.isArray(detail.comments) && detail.comments.length
-                      ? detail.comments
-                      : cacheSnap.comments || detail.comments,
-                };
-              }
-            }
-          }
-        }
         if (
           reuse.reuseFiles &&
           cacheSnap &&
@@ -725,146 +520,11 @@
           ? { ...fromNetwork._cacheReuse }
           : null;
         ensureDetailStore(current.detail);
-        applyCoreToStore(fromNetwork, { metaGenAtStart });
-        // Prefer network identity meta even when a warm cache/IDB shell painted
-        // first with stale title/body/milestone (external GH edits, reverse e2e).
-        // applyCorePayload already merges, but skipSupersedeMeta mid-open or a
-        // residual people-meta clear can leave store behind REST truth.
-        try {
-          const S = detailStoreApi();
-          if (S?.applyMeta && current.detailStore && raw) {
-            const force: Record<string, unknown> = {};
-            for (const k of [
-              'title',
-              'body',
-              'milestone',
-              'state',
-              'draft',
-              'merged',
-              'labels',
-              'assignees',
-              'requestedReviewers',
-              // Branch identity — must not stay "—" after network core paints.
-              'baseRef',
-              'headRef',
-              'baseSha',
-              'headSha',
-              'baseOwner',
-              'baseRepo',
-              'headOwner',
-              'headRepo',
-            ] as const) {
-              if (!Object.prototype.hasOwnProperty.call(raw, k)) continue;
-              const v = (raw as any)[k];
-              // Never force-null milestone/title over a richer shell — a lagging
-              // REST payload must not erase a just-written meta field. Empty
-              // labels/assignees still win (cleared on GitHub).
-              if (
-                (k === 'milestone' || k === 'title' || k === 'body') &&
-                (v == null || v === '')
-              ) {
-                continue;
-              }
-              force[k] = v;
-            }
-            if (Object.keys(force).length) {
-              S.applyMeta(current.detailStore, force, {
-                trustEmpty: true,
-                source: 'network-core-force',
-                sketch: false,
-              });
-              publishDetailFromStore();
-            }
-            // Always re-stamp identity meta from REST after core paint. Stale
-            // IDB/list-sketch can leave title/milestone/assignees behind GitHub
-            // after modal writes + hard reload (MB3/MB7 reverse e2e).
-            const identity: Record<string, unknown> = {};
-            if (raw.title != null && String(raw.title).trim() !== '') {
-              identity.title = raw.title;
-            }
-            if (raw.body != null) identity.body = raw.body;
-            // Prefer non-null network milestone; do not force-null over a richer
-            // shell (lagging REST). Non-null always wins over stale IDB/list.
-            if (raw.milestone != null) {
-              identity.milestone = raw.milestone;
-            }
-            if (Array.isArray(raw.assignees)) identity.assignees = raw.assignees;
-            if (Array.isArray(raw.labels)) identity.labels = raw.labels;
-            if (Array.isArray(raw.requestedReviewers)) {
-              identity.requestedReviewers = raw.requestedReviewers;
-            }
-            // Always stamp branch refs from REST when present (list sketch often omits).
-            for (const k of [
-              'baseRef',
-              'headRef',
-              'baseSha',
-              'headSha',
-              'baseOwner',
-              'baseRepo',
-              'headOwner',
-              'headRepo',
-            ] as const) {
-              const v = (raw as any)[k];
-              if (v != null && String(v).trim() !== '') identity[k] = v;
-            }
-            if (Object.keys(identity).length) {
-              S.applyMeta(current.detailStore, identity, {
-                // Empty assignees/labels/milestone must win on revalidate —
-                // they are authoritative REST fields on the PR object.
-                trustEmpty: true,
-                source: 'network-core-identity',
-                sketch: false,
-              });
-              publishDetailFromStore();
-            }
-            // Re-assert session people-meta after network identity. A lagging
-            // null milestone on pull REST must not stick when modal just set it
-            // (soft reopen e2e: GH has board, aside flashed "No milestone").
-            try {
-              if (
-                typeof lastPeopleMetaAuthority !== 'undefined' &&
-                lastPeopleMetaAuthority &&
-                Number(lastPeopleMetaAuthority.number) === Number(number) &&
-                lastPeopleMetaAuthority.fields
-              ) {
-                const age =
-                  Date.now() - Number(lastPeopleMetaAuthority.at || 0);
-                if (age >= 0 && age < 120_000) {
-                  const authFields = lastPeopleMetaAuthority.fields || {};
-                  const reassert: Record<string, unknown> = {};
-                  for (const k of Object.keys(authFields)) {
-                    const v = authFields[k];
-                    const empty =
-                      k === 'milestone'
-                        ? v == null
-                        : Array.isArray(v)
-                          ? v.length === 0
-                          : !v;
-                    // Only shield non-empty writes (never re-clear on reopen).
-                    if (!empty) reassert[k] = v;
-                  }
-                  if (Object.keys(reassert).length) {
-                    S.applyMeta(current.detailStore, reassert, {
-                      trustEmpty: true,
-                      source: 'people-meta-authority-core-paint',
-                      sketch: false,
-                    });
-                    publishDetailFromStore();
-                  }
-                }
-              }
-            } catch {
-              /* ignore reassert */
-            }
-          }
-        } catch {
-          /* ignore force meta */
-        }
+        applyCoreToStore(fromNetwork, { metaGenAtStart, threadWriteVersion });
         current.loading = false;
         current.error = null;
         const detail = current.detail;
         if (isFastOnly) {
-          fastCorePainted = true;
         } else {
           detailCache.set(key, detail);
           corePainted = true;
@@ -913,25 +573,7 @@
             .toLowerCase();
           const headMismatch =
             Boolean(cacheSha && liveSha && cacheSha !== liveSha) ||
-            reuseMeta?.reason === 'head-mismatch';
-          if (headMismatch) {
-            try {
-              current._sideKickStarted?.delete?.('files');
-              current._sideKickStarted?.delete?.('commits');
-            } catch {
-              /* ignore */
-            }
-            setSideFlag('files', { pending: false, settled: false }, {
-              render: false,
-            });
-            setSideFlag('commits', { pending: false, settled: false }, {
-              render: false,
-            });
-            console.log(
-              `[pr-plus] openModal cache-reuse head-mismatch ${owner}/${repo}#${number} ` +
-                `cache=${cacheSha.slice(0, 7)} live=${liveSha.slice(0, 7)} — re-fetch files/commits`
-            );
-          }
+            reuseMeta?.reason === 'head-mismatch' || reuseMeta?.reason === 'base-mismatch';
           // E2e / diagnostics: stamp reuse decision on hosts + documentElement
           const stamp =
             reuseMeta?.reuseFiles || reuseMeta?.reuseCommits
@@ -995,6 +637,8 @@
           gen,
           stillOpenFn: openStill,
           signal,
+          replaceNewestTimeline: true,
+          coreVerified: true,
         });
         // If threads already landed, merge immediately (partial progressive UI)
         if (earlyThreadsPage && typeof mergeFn === 'function') {
@@ -1039,11 +683,6 @@
         if (!openStill() || !page || typeof mergeFn !== 'function') return false;
         const nT = Array.isArray(page?.threads) ? page.threads.length : 0;
         const nC = Array.isArray(page?.comments) ? page.comments.length : 0;
-        // Empty network page must not wipe cache/store threads (GraphQL=0 races).
-        if (nT === 0 && nC === 0) {
-          stampThreadsDiag(page, { painted: false, reason: 'empty-page' });
-          return false;
-        }
         const base = current.detail;
         // Need a real detail shell (cache or core) — not empty
         if (!base || typeof base !== 'object') {
@@ -1058,7 +697,7 @@
         }
         current.loading = false;
         // Threads merge only touches threads slice (via applyThreadsToStore)
-        applyThreadsToStore(next);
+        applyThreadsToStore(next, threadWriteVersion);
         detailCache.set(key, current.detail);
         threadsPaintedEarly = true;
         setLoadStage(
@@ -1092,7 +731,8 @@
           ? (name: any, p: any, meta: any = undefined) => tl.span(name, p, meta)
           : (_n: any, p: any, _m: any = undefined) => p;
 
-      const coreCoalesceKey = `${owner}/${repo}#${number}:${gen}`;
+      // Only this open's fast/full pair shares a cancellable Stage-1 request.
+      const coreCoalesceKey = globalThis.crypto.randomUUID();
       // Stage-1 fast identity fetch (title, body, author, labels, branch refs, headSha)
       // shares Stage-1 HTTP promises with coreP via coreCoalesceKey and paints in 1 RTT.
       void span(
@@ -1303,40 +943,6 @@
             return r;
           });
 
-      // Non-blocking IDB upgrade (must not delay core paint)
-      void idbHydrateP
-        .then((idbVal) => {
-          if (!openStill() || !idbVal) return;
-          if (!cached) cached = idbVal;
-          if (detailRank(cached) < detailRank(idbVal)) cached = idbVal;
-          // Upgrade sketch-only shell if network core not yet painted
-          if (
-            !corePainted &&
-            current.detail &&
-            (current.detail._sketch || detailRank(current.detail) < detailRank(idbVal))
-          ) {
-            const nextFlat = fastCorePainted
-              ? mergeCoreWithCache(current.detail, idbVal)
-              : idbVal;
-            resetDetailStoreFromFlat(nextFlat);
-            current.loading = false;
-            render();
-            if (earlyThreadsPage) paintThreadsNewestNow(earlyThreadsPage);
-            // Side panels from cached headSha while core still in flight
-            kickIndependentSideFetches({
-              owner,
-              repo,
-              number,
-              headSha: nextFlat?.headSha || idbVal.headSha || null,
-              body: nextFlat?.body || idbVal.body || '',
-              gen,
-              stillOpenFn: openStill,
-              signal,
-            });
-          }
-        })
-        .catch(() => {});
-
       // Kick independent panels ASAP (files/comments/reviews/commits/development).
       // Do not wait for core — only checks needs headSha (re-kicked from paintCoreNow).
       {
@@ -1350,6 +956,7 @@
           gen,
           stillOpenFn: openStill,
           signal,
+          replaceNewestTimeline: true,
         });
       }
 
@@ -1494,7 +1101,7 @@
                 ? mergeFn(current.detail, newest, 'newest')
                 : current.detail;
 
-            applyThreadsToStore(next);
+            applyThreadsToStore(next, threadWriteVersion);
             detail = current.detail;
             detailCache.set(key, detail);
             render();
@@ -1545,7 +1152,7 @@
                   dirtyBulk
                 ) {
                   next = mergeFn(next, dirtyBulk, 'refresh');
-                  applyThreadsToStore(next);
+                  applyThreadsToStore(next, threadWriteVersion);
                   detail = current.detail;
                   detailCache.set(key, detail);
                   render();
@@ -1682,7 +1289,7 @@
             );
             if (!openStill()) return;
             if (current.detail) {
-              applyThreadsToStore(next);
+              applyThreadsToStore(next, threadWriteVersion);
               detail = current.detail;
               detailCache.set(key, detail);
               tryFinishOpenProgress(prog);
@@ -1706,7 +1313,7 @@
                   ? mergeFn(current.detail, newest, 'newest')
                   : current.detail;
 
-              applyThreadsToStore(next);
+              applyThreadsToStore(next, threadWriteVersion);
               detail = current.detail;
               next = detail;
               detailCache.set(key, detail);
@@ -1728,7 +1335,7 @@
               )}ms total pct=${prog.percent()} earlier=skip`
             );
             if (openStill() && current.detail) {
-              applyThreadsToStore(next);
+              applyThreadsToStore(next, threadWriteVersion);
               detail = current.detail;
               detailCache.set(key, detail);
               tryFinishOpenProgress(prog);

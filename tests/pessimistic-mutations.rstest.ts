@@ -145,6 +145,38 @@ describe('pessimistic mutations (installPrModalMutations)', () => {
     (globalThis as any).PRTreeFetch = prevApi;
   });
 
+  test('base change yields to a subsequent authoritative refresh', async () => {
+    const h = makeBag({ ...baseDetail(), baseRef: 'main', baseSha: 'old' });
+    (globalThis as any).PRTreeFetch = {
+      updatePullRequest: async () => ({ base: { ref: 'stack/root', sha: 'new' } }),
+    };
+    h.bag.onRefresh = async () => {
+      h.bag.onPatchDetail({ baseRef: 'external-base', baseSha: 'latest', files: [{ filename: 'updated' }] });
+    };
+    await h.mut.applyBaseChange('stack/root');
+    expect(h.local).toMatchObject({ baseRef: 'external-base', baseSha: 'latest', files: [{ filename: 'updated' }] });
+    expect(h.hostPatches[0]).toEqual({ baseRef: 'stack/root', baseSha: 'new' });
+  });
+
+  test('base change does not patch a different PR after navigation during the API request', async () => {
+    const h = makeBag({ ...baseDetail(), baseRef: 'main' });
+    (globalThis as any).PRTreeFetch = {
+      updatePullRequest: async () => {
+        h.bag.prIdentity = 'o/r#2';
+        return { base: { ref: 'stack/root', sha: 'new' } };
+      },
+    };
+    await h.mut.applyBaseChange('stack/root');
+    expect(h.hostPatches).toEqual([]);
+  });
+
+  test('base acknowledgement is narrow and is not replayed after refresh', async () => {
+    const h = makeBag({ ...baseDetail(), baseRef: 'main' });
+    (globalThis as any).PRTreeFetch = { updatePullRequest: async () => ({}) };
+    await h.mut.applyBaseChange('stack/root');
+    expect(h.hostPatches).toEqual([{ baseRef: 'stack/root' }]);
+  });
+
   test('onSaveBody: API failure leaves prior body (no pre-paint)', async () => {
     const h = makeBag(baseDetail());
     (globalThis as any).PRTreeFetch = {

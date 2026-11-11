@@ -55,7 +55,7 @@ export function createApplyDomainDetailToHost(opts: {
     }
     const patch: Record<string, unknown> = {};
     for (const k of DOMAIN_KEYS) {
-      if (Object.prototype.hasOwnProperty.call(next, k)) patch[k] = next[k];
+      if (Object.prototype.hasOwnProperty.call(next, k) && next[k] !== base?.[k]) patch[k] = next[k];
     }
     // Session-only discard hints (never DOMAIN_KEYS / never IDB).
     if (Object.prototype.hasOwnProperty.call(next, '_deletedReviewCommentIds')) {

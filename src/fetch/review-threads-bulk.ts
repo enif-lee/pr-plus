@@ -396,9 +396,14 @@ export function emptyReviewThreadsMeta() {
 export function mergeReviewThreadsPageIntoDetail(detail: any, page: any, direction: any = 'older') {
   if (!detail) return detail;
   const dir = String(direction || page?.direction || 'older');
-  const prevMeta = detail.reviewThreadsMeta || emptyReviewThreadsMeta();
-  const prevRc = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
-  const prevTh = Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
+  const completeSnapshot = dir === 'newest' && page?.source === 'graphql' && !page?.error &&
+    Array.isArray(page?.threads) && page.totalCount === page.threads.length && !page.hasMore;
+  const prevMeta = !completeSnapshot && detail.reviewThreadsMeta || emptyReviewThreadsMeta();
+  const previousComments = Array.isArray(detail.reviewComments) ? detail.reviewComments : [];
+  const prevRc = completeSnapshot
+    ? previousComments.filter((c: any) => c?.pending && detail.viewerPendingReview?.id)
+    : previousComments;
+  const prevTh = !completeSnapshot && Array.isArray(detail.reviewThreads) ? detail.reviewThreads : [];
 
   // Confirmed remote-null only (page.missingThreadIds). Never derive
   // requested − returned: by-id chunk fail leaves ids unknown and must not

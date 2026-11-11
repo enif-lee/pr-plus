@@ -34,7 +34,7 @@
 | **Review without page navigation** | Click a PR on `/pulls` → full **modal** or **side sheet**. Stay on the list; no full PR page hop. |
 | **PR page embed** | On `/pull/N`, replace the native PR body with the **same pr+ shell** (full window); restore GitHub UI anytime. |
 | **Ultra-fast, progressive open** | **List sketch → durable cache → live network** so the shell paints **synchronously** on click, then **incremental** fills refine the data. |
-| **Cache-first, soft revalidate** | Memory + **IndexedDB** cache with background refresh—writes stay snappy without cold remounts. |
+| **Live state on every open** | Memory + **IndexedDB** provide a loading preview; current API responses replace it, including cleared metadata and deleted rows. |
 | **Butter-smooth Diff** | **Range-gated virtualization**, syntax-highlight **cache**, and zero per-pixel app re-renders while you scroll. |
 | **Stack visibility** | List reorders into a base/head **stack tree**; the shell shows a **stacked PR strip** (horizontal scroll) for the current chain. |
 | **Review workflow in one place** | Conversation, Diff, leave review, line comments, suggestions, filters, subscribe, merge—without bouncing GitHub tabs. |
@@ -97,7 +97,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 |---------|-------------|
 | **Progressive open** | **List sketch → IndexedDB cache → live API**—paint the shell **fast**, then **incrementally** refine body, threads, and files |
 | **Parallel fetch** | PR core, files, comments, reviews, commits, checks, and subscription load **concurrently** (not waterfall) |
-| **Multi-layer cache** | In-memory SWR + **durable IndexedDB** so reopen is near-instant; patches revalidated on demand |
+| **Multi-layer cache** | In-memory + **durable IndexedDB** for immediate previews; Diff reuse requires a verified matching base/head comparison |
 | **Soft revalidate / incremental update** | Background refresh after open and after writes—no cold remount, no full-page spinner |
 | **Load status in header stats** | The **+add / −del / files** badge morphs to short progress labels while metadata and threads stream in (no floating pill / top bar) |
 | **Dual-window review threads** | Newest + oldest thread windows load **incrementally**; **Load more / Load all** when you need the full set |

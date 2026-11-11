@@ -135,7 +135,7 @@ export async function apiJson(
     ...buildApiHeaders(token),
     ...(opts.headers && typeof opts.headers === 'object' ? opts.headers : {}),
   };
-  const init: RequestInit = { headers };
+  const init: RequestInit = { headers, cache: opts.cache || 'no-store' };
   // Prefer no-store for identity meta (milestone/title) so hard reopen after a
   // modal write cannot paint a browser-cached pre-write pull/issue body.
   if (opts.cache) init.cache = opts.cache;
@@ -153,7 +153,7 @@ export async function apiJson(
  * @returns {Promise<{ data: any, link: string }>}
  */
 export async function apiJsonWithLink(url: any, fetchImpl: any, token: any) {
-  const res = await fetchImpl(url, { headers: buildApiHeaders(token) });
+  const res = await fetchImpl(url, { headers: buildApiHeaders(token), cache: 'no-store' });
   if (!res.ok) {
     const err = new Error(`GitHub API ${res.status}: ${res.statusText}`);
     err.status = res.status;

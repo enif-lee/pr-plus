@@ -389,6 +389,8 @@
       merged: Boolean(detail.merged),
       baseRef: detail.baseRef || detail.base?.ref || undefined,
       headRef: detail.headRef || detail.head?.ref || undefined,
+      baseSha: detail.baseSha || detail.base?.sha || undefined,
+      headSha: detail.headSha || detail.head?.sha || undefined,
       author:
         typeof detail.author === 'string'
           ? detail.author
@@ -439,14 +441,29 @@
    *   forceLabels: include labels even when empty (meta write cleared them)
    */
   function applyOpenDetailToListRow(opts: any = {}) {
-    if (typeof isPullsListPage === 'function' && !isPullsListPage()) {
-      return false;
-    }
     const number = Number(opts?.number);
     let fields =
       opts?.fields ||
       listRowFieldsFromDetail(opts?.detail, number);
     if (!fields || !Number.isFinite(fields.number)) return false;
+
+    // Keep the stack and branch picker current on direct /pull/N pages too.
+    // Older row requests must not undo this acknowledged detail. Keep the
+    // open-list request alive: a cold direct PR still needs the other PRs.
+    pullsListRefreshAbort?.abort();
+    const owner = opts.owner || opts.detail?.owner || current.owner;
+    const repo = opts.repo || opts.detail?.repo || current.repo;
+    const key = `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}`;
+    if (openPullsFetchP && openPullsFetchKey === key) {
+      openPullsFetchPatches.set(fields.number, {
+        ...openPullsFetchPatches.get(fields.number), ...fields,
+      });
+    }
+    if (openPullsFetchedKey === key && Array.isArray(openPullsFetched)) {
+      openPullsFetched = openPullsFetched.map((pr: any) =>
+        Number(pr.number) === fields.number ? { ...pr, ...fields } : pr
+      );
+    }
 
     // Explicit label writes (incl. clear-all) must reach the native row
     if (
@@ -465,7 +482,7 @@
         delete cachePatch.listCommentCount;
         delete cachePatch.number;
         if (Object.keys(cachePatch).length) {
-          app.patchCachedPr(fields.number, cachePatch);
+          app.patchCachedPr(fields.number, cachePatch, { owner, repo });
         }
       }
     } catch {
@@ -473,6 +490,7 @@
     }
 
     // 2) Native row: labels / title / comment count / draft meta
+    if (typeof isPullsListPage === 'function' && !isPullsListPage()) return false;
     try {
       const dom = (globalThis as any).PRTreeDOM;
       if (typeof dom?.applyListRowFromDetail === 'function') {
@@ -558,6 +576,15 @@
       if (pullsListRefreshAbort === ac) pullsListRefreshAbort = null;
     }
     if (ac.signal.aborted || location.href !== pageUrl || !snapshot) return;
+
+    // Per-row GraphQL truth must survive the concurrent open-list REST read.
+    const key = `${String(owner).toLowerCase()}/${String(repo).toLowerCase()}`;
+    if (openPullsFetchP && openPullsFetchKey === key) {
+      for (const pr of snapshot.prs || []) {
+        const n = Number(pr.number);
+        openPullsFetchPatches.set(n, { ...openPullsFetchPatches.get(n), ...pr });
+      }
+    }
 
     // Keep refreshed indicators in the tree cache as well as the native rows.
     const app = (globalThis as any).__PR_TREE_APP__;

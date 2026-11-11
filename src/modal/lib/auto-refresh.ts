@@ -95,12 +95,18 @@ export function headProbeIndicatesStale(
 export function prProbeIndicatesStale(
   baseline: {
     headSha?: string | null;
+    baseSha?: string | null;
+    baseRef?: string | null;
+    headRef?: string | null;
     draft?: boolean | null;
     state?: string | null;
     updatedAt?: string | null;
   } | null | undefined,
   probe: {
     headSha?: string | null;
+    baseSha?: string | null;
+    baseRef?: string | null;
+    headRef?: string | null;
     draft?: boolean | null;
     state?: string | null;
     updatedAt?: string | null;
@@ -113,6 +119,9 @@ export function prProbeIndicatesStale(
   if (baseSha && probeSha && baseSha !== probeSha) return true;
   // Empty baseline SHA: any non-empty probe head is enough to revalidate once
   if (!baseSha && probeSha) return true;
+  for (const key of ['baseSha', 'baseRef', 'headRef'] as const) {
+    if (probe[key] != null && probe[key] !== '' && base[key] !== probe[key]) return true;
+  }
 
   if (typeof probe.draft === 'boolean' && typeof base.draft === 'boolean') {
     if (Boolean(probe.draft) !== Boolean(base.draft)) return true;

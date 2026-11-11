@@ -582,6 +582,9 @@ export async function fetchPrTimelineItemsPage(
       { ...ctx, qName: 'TimelineItemsPage' }
     );
     const conn = data?.repository?.pullRequest?.timelineItems;
+    if (!conn || !Array.isArray(conn.nodes) || !conn.pageInfo) {
+      throw new Error('Timeline connection unavailable');
+    }
     const nodes = Array.isArray(conn?.nodes) ? conn.nodes : [];
     const mapped = mapGraphqlTimelineNodes(nodes);
     const pageInfo = conn?.pageInfo || empty.pageInfo;

@@ -4,6 +4,10 @@
     const owner = current.owner;
     const repo = current.repo;
     const number = current.number;
+    const comparisonKey = () => JSON.stringify([
+      current.owner, current.repo, current.number, current.detail?.baseRef,
+      current.detail?.baseSha, current.detail?.headRef, current.detail?.headSha,
+    ]);
     const openPulls = resolveOpenPulls();
     const presentation = isEmbedPresentation(current.presentation)
       ? 'embed'
@@ -197,6 +201,7 @@
         const key = detailKey(owner, repo, number);
         // Cancel prior open/refresh fetches; new cancelable session
         const { gen, signal, metaGenAtStart } = beginOpenFetchSession();
+        const threadWriteVersion = current._sideWriteVersions?.threads || 0;
         const prevDetail = current.detail;
         current.error = null;
         setLoadStage(
@@ -250,119 +255,14 @@
           /** Partial paint helper for refresh core (immediate on resolve). */
           function paintRefreshCore(raw: any) {
             if (!stillOpen() || !raw) return null;
-            let detail = raw;
-            // Prefer live on-screen threads (may include early-fetched newest)
-            // over stale prevDetail when network core has empty comments.
-            // Never re-seed discarded PENDING when network has no viewer PENDING.
-            const threadSrc =
-              current.detail &&
-              Array.isArray(current.detail.reviewComments) &&
-              current.detail.reviewComments.length
-                ? current.detail
-                : prevDetail;
-            const pureStore =
-              typeof globalThis !== 'undefined'
-                ? (globalThis as any).PRModalDetailStore
-                : null;
-            const netRc = Array.isArray(detail.reviewComments)
-              ? detail.reviewComments
-              : [];
-            const srcRc =
-              threadSrc && Array.isArray(threadSrc.reviewComments)
-                ? threadSrc.reviewComments
-                : [];
-            if (threadSrc && srcRc.length && netRc.length) {
-              const mergeFn =
-                typeof pureStore?.mergeCommentsHostFirst === 'function'
-                  ? pureStore.mergeCommentsHostFirst
-                  : null;
-              if (mergeFn) {
-                detail = {
-                  ...detail,
-                  reviewComments: mergeFn(netRc, srcRc, {
-                    hostAuthoritative: true,
-                    networkDetail: detail,
-                  }),
-                };
-              }
-            } else if (threadSrc && srcRc.length && !netRc.length) {
-              const netHasPending =
-                typeof pureStore?.detailHasViewerPending === 'function'
-                  ? pureStore.detailHasViewerPending(detail)
-                  : Boolean(detail?.viewerPendingReview?.id);
-              // After Discard / when network has no PENDING: do not reinject
-              if (netHasPending) {
-                const filterFn =
-                  typeof pureStore?.filterCacheReviewCommentsForCore ===
-                  'function'
-                    ? pureStore.filterCacheReviewCommentsForCore
-                    : null;
-                const cleanedRc = filterFn
-                  ? filterFn(srcRc, {
-                      ...detail,
-                      _deletedReviewCommentIds: [
-                        ...(Array.isArray(detail?._deletedReviewCommentIds)
-                          ? detail._deletedReviewCommentIds
-                          : []),
-                        ...(Array.isArray(threadSrc?._deletedReviewCommentIds)
-                          ? threadSrc._deletedReviewCommentIds
-                          : []),
-                      ],
-                    })
-                  : srcRc.filter((c: any) => c && c.id != null);
-                if (cleanedRc.length) {
-                  detail = {
-                    ...detail,
-                    reviewComments: cleanedRc,
-                    reviewThreads:
-                      threadSrc.reviewThreads || detail.reviewThreads,
-                    reviewThreadsMeta:
-                      threadSrc.reviewThreadsMeta || detail.reviewThreadsMeta,
-                    reviewCommentsMeta:
-                      threadSrc.reviewCommentsMeta ||
-                      detail.reviewCommentsMeta,
-                  };
-                }
-              }
-            }
-            if (prevDetail && Array.isArray(prevDetail.files) && prevDetail.files.length) {
-              const netFiles = Array.isArray(detail.files) ? detail.files : [];
-              const cachedHasPatches = prevDetail.files.some(
-                (f: any) =>
-                  f &&
-                  typeof f.patch === 'string' &&
-                  f.patch.length > 0 &&
-                  !f._patchOmitted
-              );
-              const netHasPatches = netFiles.some(
-                (f: any) =>
-                  f &&
-                  typeof f.patch === 'string' &&
-                  f.patch.length > 0 &&
-                  !f._patchOmitted
-              );
-              const netSlim =
-                netFiles.length > 0 &&
-                (netFiles.some((f: any) => f && f._patchOmitted) || !netHasPatches);
-              if (cachedHasPatches && (netFiles.length === 0 || netSlim)) {
-                detail = { ...detail, files: prevDetail.files };
-              }
-            }
-            if (
-              prevDetail &&
-              Array.isArray(prevDetail.commits) &&
-              prevDetail.commits.length &&
-              (!Array.isArray(detail.commits) || !detail.commits.length)
-            ) {
-              detail = { ...detail, commits: prevDetail.commits };
-            }
+            const detail = raw;
             current.loading = false;
             // Core refresh: meta slice only (isolation). If App meta write
             // bumped metaRefreshGen mid-flight, skip supersede keys.
             // trustNetworkMeta: do not re-assert people-meta write-through over
             // an external GitHub chip/assignee/reviewer change.
             ensureDetailStore(current.detail || prevDetail);
-            applyCoreToStore(detail, { metaGenAtStart, trustNetworkMeta: true });
+            applyCoreToStore(detail, { metaGenAtStart, threadWriteVersion, trustNetworkMeta: true });
             current.error = null;
             detailCache.set(key, current.detail);
             setLoadStage(
@@ -382,6 +282,7 @@
               stillOpenFn: stillOpen,
               signal,
               replaceNewestTimeline: true,
+              coreVerified: true,
             });
             // Re-apply early thread fetches after core shell is updated
             if (earlyRefreshThreadsPage) {
@@ -397,7 +298,7 @@
             if (!stillOpen() || !page || typeof mergeFn !== 'function') return false;
             if (!current.detail) return false;
             const next = mergeFn(current.detail, page, 'newest');
-            applyThreadsToStore(next);
+            applyThreadsToStore(next, threadWriteVersion);
             detailCache.set(key, current.detail);
             setLoadStage(
               'threads',
@@ -413,7 +314,7 @@
             if (!stillOpen() || !bulk || typeof mergeFn !== 'function') return false;
             if (!current.detail) return false;
             const next = mergeFn(current.detail, bulk, 'refresh');
-            applyThreadsToStore(next);
+            applyThreadsToStore(next, threadWriteVersion);
             detailCache.set(key, current.detail);
             setLoadStage(
               'threads',
@@ -582,7 +483,7 @@
               if (bulk) {
                 const next = mergeFn(current.detail, bulk, 'refresh');
                 // Threads slice only — do not replace other domains
-                applyThreadsToStore(next);
+                applyThreadsToStore(next, threadWriteVersion);
                 detailCache.set(key, current.detail);
               }
             } else {
@@ -664,7 +565,7 @@
             typeof mergeFn === 'function'
               ? mergeFn(current.detail, newest, 'newest')
               : current.detail;
-          applyThreadsToStore(next);
+          applyThreadsToStore(next, threadWriteVersion);
           next = current.detail;
           detailCache.set(key, next);
           render();
@@ -797,7 +698,7 @@
             // soft revalidate: remaining by-ids done; ladder already from kickoff
             creditThreadLadder();
             if (stillOpen()) {
-              applyThreadsToStore(next);
+              applyThreadsToStore(next, threadWriteVersion);
               detailCache.set(key, current.detail);
               tryFinishOpenProgress(prog);
               render();
@@ -879,6 +780,8 @@
             direction == null ||
             direction === false);
         const gen = detailFetchGen;
+        const threadWriteVersion = current._sideWriteVersions?.threads || 0;
+        const commentsWriteVersion = current._sideWriteVersions?.comments || 0;
         const mergeFn =
           (globalThis as any).PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
         const pure = (globalThis as any).PRModalConversationTimeline;
@@ -1283,7 +1186,7 @@
               if (priorTimelineMeta != null && next.timelineMeta == null) {
                 next = { ...next, timelineMeta: priorTimelineMeta };
               }
-              applyThreadsToStore(next);
+              applyThreadsToStore(next, threadWriteVersion);
               next = current.detail;
               detailCache.set(detailKey(owner, repo, number), next);
             }
@@ -1297,6 +1200,11 @@
               };
               const step = await loadOneTimelinePage(next);
               if (gen !== detailFetchGen) return null;
+              if (commentsWriteVersion !== (current._sideWriteVersions?.comments || 0)) {
+                clearLoadStage();
+                render();
+                return current.detail;
+              }
               if (!step.detail) return null;
               if (!step.progressed) {
                 next = clearStuckTimeline(step.detail, 'no-progress');
@@ -1414,6 +1322,7 @@
         if (!missing.length) return current.detail;
 
         const gen = detailFetchGen;
+        const threadWriteVersion = current._sideWriteVersions?.threads || 0;
         try {
           const bulk = await (globalThis as any).PRTreeFetch.fetchReviewThreadsByIds(
             missing,
@@ -1427,7 +1336,7 @@
             (globalThis as any).PRTreeFetch?.mergeReviewThreadsPageIntoDetail || null;
           if (typeof mergeFn !== 'function') return current.detail;
           const next = mergeFn(current.detail, bulk, 'ids');
-          applyThreadsToStore(next);
+          applyThreadsToStore(next, threadWriteVersion);
           detailCache.set(detailKey(owner, repo, number), current.detail);
           render();
           console.log(
@@ -1481,11 +1390,15 @@
         if (!(globalThis as any).PRTreeFetch?.fetchAllPrCommits) {
           throw new Error('Full commits fetch unavailable');
         }
-        return (globalThis as any).PRTreeFetch.fetchAllPrCommits(
+        const gen = detailFetchGen;
+        const comparison = comparisonKey();
+        const result = await (globalThis as any).PRTreeFetch.fetchAllPrCommits(
           owner,
           repo,
-          current.number
+          number,
+          { signal: openFetchAbort?.signal || null }
         );
+        return gen === detailFetchGen && comparison === comparisonKey() ? result : null;
       },
       /** Remaining PR files beyond the initial page (for searchable files nav). */
       onFetchAllPrFiles: async (options: any = {}) => {
@@ -1495,12 +1408,16 @@
         if (!(globalThis as any).PRTreeFetch?.fetchAllPrFiles) {
           throw new Error('Full files fetch unavailable');
         }
-        return (globalThis as any).PRTreeFetch.fetchAllPrFiles(owner, repo, current.number, {
+        const gen = detailFetchGen;
+        const comparison = comparisonKey();
+        const result = await (globalThis as any).PRTreeFetch.fetchAllPrFiles(owner, repo, number, {
           gitattributesText:
             options.gitattributesText ||
             current.detail?.gitattributesText ||
             '',
+          signal: openFetchAbort?.signal || null,
         });
+        return gen === detailFetchGen && comparison === comparisonKey() ? result : null;
       },
     };
   }

@@ -97,6 +97,7 @@
    */
   async function refreshOpenChecksOnly(owner: any, repo: any, number: any) {
     if (autoRefreshChecksInFlight || autoRefreshRevalidating) return;
+    const gen = detailFetchGen;
     const headSha = String(current.detail?.headSha || '').trim();
     if (!headSha) return;
     const api = (globalThis as any).PRTreeFetch;
@@ -107,6 +108,7 @@
       const checks = await api.fetchPrChecks(owner, repo, headSha);
       if (
         !current.open ||
+        gen !== detailFetchGen || headSha !== current.detail?.headSha ||
         String(current.owner || '') !== String(owner || '') ||
         String(current.repo || '') !== String(repo || '') ||
         Number(current.number) !== Number(number)
@@ -143,13 +145,14 @@
     }
   }
 
-  async function tickAutoRefresh() {
+  async function tickAutoRefresh(opts: any = {}) {
     if (!canRunAutoRefreshTick()) return;
     if (autoRefreshProbeInFlight || autoRefreshRevalidating) return;
     const owner = current.owner;
     const repo = current.repo;
     const number = current.number;
     const detail = current.detail;
+    const gen = detailFetchGen;
     const baseline = String(detail?.headSha || '').trim();
     // Allow probe when SHA missing if we still have lifecycle fields to compare
     if (!baseline && detail?.state == null && detail?.draft == null) return;
@@ -159,9 +162,10 @@
 
     autoRefreshProbeInFlight = true;
     try {
-      const probe = await api.fetchPrHeadProbe(owner, repo, number);
+      const probe = opts.force ? null : await api.fetchPrHeadProbe(owner, repo, number);
       if (
         !current.open ||
+        gen !== detailFetchGen ||
         String(current.owner || '') !== String(owner || '') ||
         String(current.repo || '') !== String(repo || '') ||
         Number(current.number) !== Number(number)
@@ -172,11 +176,14 @@
       const nextHead = String(probe?.headSha || '').trim();
       const pure = autoRefreshApi();
       const lifecycleStale =
-        typeof pure?.prProbeIndicatesStale === 'function'
+        opts.force || (typeof pure?.prProbeIndicatesStale === 'function'
           ? Boolean(
               pure.prProbeIndicatesStale(
                 {
                   headSha: detail?.headSha,
+                  baseSha: detail?.baseSha,
+                  baseRef: detail?.baseRef,
+                  headRef: detail?.headRef,
                   draft: detail?.draft,
                   state: detail?.state,
                   updatedAt: detail?.updatedAt,
@@ -184,7 +191,7 @@
                 probe
               )
             )
-          : headProbeIndicatesStale(baseline, nextHead);
+          : headProbeIndicatesStale(baseline, nextHead));
       if (!lifecycleStale) {
         // Same head/draft/state/updatedAt: CI can still complete. Refresh
         // checks only (does not abort the open session).
@@ -227,7 +234,8 @@
     if (typeof document === 'undefined') return;
     if (document.visibilityState === 'visible') {
       // Resume: one immediate tick if still within activity window
-      void tickAutoRefresh();
+      noteAutoRefreshAction({ force: true });
+      void tickAutoRefresh({ force: true });
     }
   }
 
@@ -248,6 +256,7 @@
           onAutoRefreshVisibility,
           false
         );
+        window.addEventListener('focus', onAutoRefreshVisibility);
         // Capture-phase so we see events inside shadow hosts / modal
         const opts = { capture: true, passive: true };
         document.addEventListener('pointerdown', onAutoRefreshUserEvent, opts);
