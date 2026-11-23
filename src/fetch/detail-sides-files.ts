@@ -84,67 +84,50 @@ export async function fetchPrChecks(owner: any, repo: any, headSha: any, fetchIm
   const bust = () =>
     `_prp=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   const noCache = { cache: 'no-store' as RequestCache };
-  let checks = { ...empty };
-  try {
-    const status = await apiJson(
+  // These two responses form one authoritative snapshot. A failed request is
+  // not an empty result; let the host keep its last successful snapshot.
+  const [status, runs] = await Promise.all([
+    apiJson(
       `${base}/commits/${encodeURIComponent(sha)}/status?${bust()}`,
       fetchImpl,
       token,
       noCache
-    );
-    const statusList = Array.isArray(status?.statuses) ? status.statuses : [];
-    const emptyCombined =
-      !statusList.length && !(Number(status?.total_count) > 0);
-    checks = {
-      state: emptyCombined ? 'unknown' : status.state || 'unknown',
-      totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
-      statuses: statusList.map((s: any) => ({
-        context: s.context || '',
-        state: s.state || '',
-        description: s.description || '',
-        targetUrl: s.target_url || '',
-        createdAt: s.created_at || '',
-        updatedAt: s.updated_at || '',
-      })),
-      checkRuns: [],
-    };
-  } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
-      throw err;
-    }
-  }
-  try {
-    const runs = await apiJson(
+    ),
+    apiJson(
       `${base}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100&filter=latest&${bust()}`,
       fetchImpl,
       token,
       noCache
-    );
-    const list = runs?.check_runs || [];
-    if (list.length) {
-      checks.checkRuns = list.map((r: any) => ({
-        id: r.id,
-        name: r.name || '',
-        status: r.status || '',
-        conclusion: r.conclusion || '',
-        htmlUrl: r.html_url || '',
-        startedAt: r.started_at || '',
-        completedAt: r.completed_at || '',
-        appSlug: r.app?.slug || '',
-        appName: r.app?.name || '',
-      }));
-    }
-  } catch (err) {
-    if (
-      err?.name === 'AbortError' ||
-      /aborted|AbortError/i.test(String(err?.message || ''))
-    ) {
-      throw err;
-    }
+    ),
+  ]);
+  if (!Array.isArray(status?.statuses) || !Array.isArray(runs?.check_runs)) {
+    throw new Error('GitHub returned an invalid CI checks response');
   }
+  const statusList = status.statuses;
+  const emptyCombined = !statusList.length && !(Number(status.total_count) > 0);
+  const checks = {
+    state: emptyCombined ? 'unknown' : status.state || 'unknown',
+    totalCount: emptyCombined ? 0 : status.total_count || statusList.length,
+    statuses: statusList.map((s: any) => ({
+      context: s.context || '',
+      state: s.state || '',
+      description: s.description || '',
+      targetUrl: s.target_url || '',
+      createdAt: s.created_at || '',
+      updatedAt: s.updated_at || '',
+    })),
+    checkRuns: runs.check_runs.map((r: any) => ({
+      id: r.id,
+      name: r.name || '',
+      status: r.status || '',
+      conclusion: r.conclusion || '',
+      htmlUrl: r.html_url || '',
+      startedAt: r.started_at || '',
+      completedAt: r.completed_at || '',
+      appSlug: r.app?.slug || '',
+      appName: r.app?.name || '',
+    })),
+  };
   const normalize =
     (typeof globalThis !== 'undefined' &&
       (globalThis as any).PRModalChecks?.normalizeChecks) ||
