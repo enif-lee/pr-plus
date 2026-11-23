@@ -4940,6 +4940,7 @@ export function PrModalApp({
           onPick={(opt: any) => picker?.onPick?.(opt)}
           onClose={closePicker}
           allowFreeText={picker?.allowFreeText !== false}
+          literalInput={picker?.type === 'base'}
   // @ts-expect-error modal dynamic action/picker shapes
           allowCreate={Boolean(picker?.allowCreate)}
           onCreate={

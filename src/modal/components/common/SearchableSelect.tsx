@@ -11,6 +11,7 @@ import {
 import { Avatar } from './Avatar';
 import { IconCheck } from './icons';
 import { ShortcutHint } from './ShortcutHint';
+import { useT } from '@lib/locale-context';
 import './SearchableSelect.css';
 
 /**
@@ -33,6 +34,8 @@ export function SearchableSelect({
   placeholder = 'Type to filter…',
   emptyLabel = 'No matches',
   allowFreeText = true,
+  /** Single-select: submit the typed ID literally, not the first partial match. */
+  literalInput = false,
   /**
    * When true and the typed name does not match any option, show a Create… row.
    * Click / Enter (with no filtered hits) calls onCreate(name) when provided,
@@ -73,6 +76,7 @@ export function SearchableSelect({
   minWidth = 220,
   maxWidth = 320,
 }: any) {
+  const t = useT();
   const footerVisible =
     showFooter == null ? Boolean(multi) : Boolean(showFooter);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -165,6 +169,12 @@ export function SearchableSelect({
   onConfirmRef.current = onConfirm;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const free = String(query || '').trim();
+  const literalOption = literalInput && !multi && allowFreeText && free
+    ? { id: free, label: free }
+    : null;
+  const literalOptionRef = useRef(literalOption);
+  literalOptionRef.current = literalOption;
 
   // Latch body attr so CSS can hide Conversation Opt tips even if :has is flaky.
   useEffect(() => {
@@ -197,6 +207,7 @@ export function SearchableSelect({
       }
     };
     const onKey = (e: KeyboardEvent) => {
+      if (literalInput && e.isComposing) return;
       if (e.key === 'Escape') {
         // Claim before App shell close (window capture).
         claim(e);
@@ -213,6 +224,8 @@ export function SearchableSelect({
           } else if (ids.length === 1) {
             onPickRef.current?.({ id: ids[0], label: ids[0] });
           }
+        } else if (literalOptionRef.current) {
+          onPickRef.current?.(literalOptionRef.current);
         } else {
           try {
             const btn = panelRef.current?.querySelector?.(
@@ -254,7 +267,7 @@ export function SearchableSelect({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('mousedown', onDown, true);
     };
-  }, [open, onClose, anchorRef]);
+  }, [open, onClose, anchorRef, literalInput]);
 
   const selectedSet = useMemo(
     () => new Set(selected.map((s) => s.toLowerCase())),
@@ -264,7 +277,7 @@ export function SearchableSelect({
   if (!open) return null;
 
   const filtered = filteredLive;
-  const free = String(query || '').trim();
+  const showLiteral = literalOption && !filtered.some((o: any) => o.id === free);
   const exactMatch =
     typeof queryMatchesOption === 'function'
       ? queryMatchesOption(options, free)
@@ -343,6 +356,10 @@ export function SearchableSelect({
         toggleId(free);
         onQuery?.('');
       }
+      return;
+    }
+    if (literalOption) {
+      onPick?.(literalOption);
       return;
     }
     if (filtered[0]) {
@@ -436,6 +453,7 @@ export function SearchableSelect({
             }
           }
           if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+            if (literalInput && e.nativeEvent.isComposing) return;
             e.preventDefault();
             if (multi && !filtered[0] && !free && selected.length) {
               confirmMulti();
@@ -446,7 +464,21 @@ export function SearchableSelect({
         }}
       />
       <ul className="prp-sselect-list">
-        {filtered.length === 0 && !showCreate ? (
+        {showLiteral ? (
+          <li>
+            <button
+              type="button"
+              className="prp-sselect-item"
+              onClick={() => onPick?.(literalOption)}
+            >
+              <span className="prp-sselect-item__text">
+                <span className="prp-sselect-item__label">{t('header_use_typed_base')}</span>
+                <span className="prp-sselect-item__secondary">{free}</span>
+              </span>
+            </button>
+          </li>
+        ) : null}
+        {filtered.length === 0 && !showCreate && !showLiteral ? (
           <li className="prp-sselect-empty prp-muted">
             {allowFreeText && free
               ? multi

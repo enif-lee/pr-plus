@@ -465,8 +465,6 @@ export function buildBranchOptions(prs: any, ctx: any = {}) {
   if (ctx.baseRef) names.add(String(ctx.baseRef));
   if (ctx.headRef) names.add(String(ctx.headRef));
   for (const e of ctx.extra || []) if (e) names.add(String(e));
-  // Common defaults
-  for (const d of ['main', 'master', 'develop', 'dev', 'trunk']) names.add(d);
   return [...names]
     .filter(Boolean)
     .sort((a: any, b: any) => String(a).localeCompare(String(b)))

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from '@rstest/core';
 import {
+  buildBranchOptions,
   filterSelectOptions,
   pickFilteredOptionByIndex,
   resolveOptDigitPickIndex,
@@ -19,6 +20,26 @@ const root = path.resolve(__dirname, '..');
 function read(rel: string): string {
   return fs.readFileSync(path.join(root, rel), 'utf8');
 }
+
+describe('base branch options', () => {
+  test('does not invent conventional branch names when no refs are known', () => {
+    expect(buildBranchOptions([])).toEqual([]);
+  });
+
+  test('offers only supplied refs and keeps conventional names when supplied', () => {
+    const options = buildBranchOptions([
+      { headRef: 'feature/a', baseRef: 'release/1' },
+      { headRef: 'feature/b', baseRef: 'release/1' },
+    ], {
+      baseRef: 'main',
+      headRef: 'feature/a',
+      extra: ['support/1'],
+    });
+    expect(options.map((option) => option.id)).toEqual([
+      'feature/a', 'feature/b', 'main', 'release/1', 'support/1',
+    ]);
+  });
+});
 
 describe('⌥1–3 filtered pick (shipped pure helpers)', () => {
   test('resolveOptDigitPickIndex maps Digit1–3 only with alt', () => {

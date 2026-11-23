@@ -158,7 +158,7 @@ export const popupEn: MessageCatalog = {
   popup_pat_classic:
     'Classic: repo (full PR features including private). Add notifications to Subscribe.',
   popup_pat_fine:
-    'Fine-grained: Pull requests Read & Write on target repos. Contents Read & Write for apply suggestion and file upload.',
+    'Fine-grained: Pull requests Read & Write on target repos. Commit statuses and Checks Read for CI. Contents Read & Write for apply suggestion and file upload.',
   popup_pat_security_note:
     'Tokens are used only in the service worker and are never exposed to content scripts.',
   popup_ghe_intro:
@@ -300,7 +300,7 @@ export const popupKo: MessageCatalog = {
   popup_pat_classic:
     'Classic: repo (프라이빗 포함 전체 PR 기능). 구독(Subscribe) 쓰려면 notifications 추가.',
   popup_pat_fine:
-    'Fine-grained: 대상 저장소에 Pull requests Read & Write. 제안 적용·파일 업로드는 Contents Read & Write.',
+    'Fine-grained: 대상 저장소에 Pull requests Read & Write. CI는 Commit statuses·Checks Read, 제안 적용·파일 업로드는 Contents Read & Write.',
   popup_pat_security_note:
     '토큰은 서비스 워커에서만 사용되며 content script에는 노출되지 않습니다.',
   popup_ghe_intro:
@@ -442,7 +442,7 @@ export const popupJa: MessageCatalog = {
   popup_pat_classic:
     'Classic: repo（プライベート含む PR 全機能）。Subscribe には notifications を追加。',
   popup_pat_fine:
-    'Fine-grained: 対象リポジトリで Pull requests Read & Write。提案適用・ファイルアップロードは Contents Read & Write。',
+    'Fine-grained: 対象リポジトリで Pull requests Read & Write。CI は Commit statuses と Checks の Read、提案適用・ファイルアップロードは Contents Read & Write。',
   popup_pat_security_note:
     'トークンはサービスワーカーのみで使用し、content script には露出しません。',
   popup_ghe_intro:
@@ -584,7 +584,7 @@ export const popupZh: MessageCatalog = {
   popup_pat_classic:
     'Classic：repo（含私有仓库的完整 PR 功能）。订阅需额外 notifications。',
   popup_pat_fine:
-    'Fine-grained：目标仓库 Pull requests 读写。应用建议与上传文件需 Contents 读写。',
+    'Fine-grained：目标仓库 Pull requests 读写。CI 需 Commit statuses 和 Checks 读取权限。应用建议与上传文件需 Contents 读写。',
   popup_pat_security_note: '令牌仅在 service worker 中使用，不会暴露给 content script。',
   popup_ghe_intro:
     '为每个主机注册 PAT（最多 3 个）。仅手动添加的主机生效，不使用默认 PAT。',
