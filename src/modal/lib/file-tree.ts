@@ -408,6 +408,33 @@ export function filterFilesCommentedOnly(files: any, threadCounts: any, commente
 }
 
 /**
+ * Rename / move with no content change: GitHub reports `status: "renamed"`
+ * with `previous_filename` and `+0 −0`. A rename that also edits content
+ * carries non-zero additions/deletions and is NOT pure (GitHub shows its diff).
+ *
+ * @param {{ status?: string, additions?: number, deletions?: number, changes?: number }} file
+ * @returns {boolean}
+ */
+export function isPureRenameFile(file: any): boolean {
+  if (!file || typeof file !== 'object') return false;
+  const status = String(file.status || file.changeType || '').toLowerCase();
+  if (status !== 'renamed' && status !== 'moved') return false;
+  return Number(file.additions || 0) === 0 && Number(file.deletions || 0) === 0;
+}
+
+/**
+ * Drop pure renames / moves from a file list. Files renamed *with* content
+ * changes, binaries and images (+0 −0 but not a rename) are kept.
+ *
+ * @param {Array<object>} files
+ * @returns {Array<object>}
+ */
+export function filterFilesExcludePureRenames(files: any): any[] {
+  const list = Array.isArray(files) ? files : [];
+  return list.filter((f) => !isPureRenameFile(f));
+}
+
+/**
  * Collect every dir path in a nested tree (for auto-expand while filtering).
  * @param {TreeNode[]} nodes
  * @returns {Set<string>}

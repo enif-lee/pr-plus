@@ -131,6 +131,13 @@ export function flattenFilesToVirtualRows(files: any, mode = 'unified', options:
       status,
       additions,
       deletions,
+      // Rename / move: path before the change (GitHub shows "old → new").
+      previousFilePath:
+        String(status).toLowerCase() === 'renamed' &&
+        file.previous_filename &&
+        file.previous_filename !== path
+          ? String(file.previous_filename)
+          : null,
       // Fully closed when collapsed — no "(collapsed)" label text
       text: `${status} ${path} ${stats}`,
       rowIndex: index++,

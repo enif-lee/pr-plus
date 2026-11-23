@@ -203,6 +203,7 @@ import {
   filterFilesByExtensions,
   filterFilesUnreadOnly,
   filterFilesCommentedOnly,
+  filterFilesExcludePureRenames,
   hasAnyReviewThreads,
 } from '../lib/file-tree';
 import {
@@ -1789,6 +1790,9 @@ export function PrModalApp({
    */
   const displayFiles = useMemo(() => {
     let list = Array.isArray(annotatedFiles) ? annotatedFiles : [];
+    // GitHub lists a pure rename/move (+0 −0) but has no diff to show for it.
+    // Keep it out of the Diff list, file tree and prev/next file nav.
+    list = filterFilesExcludePureRenames(list);
     // Name query is applied in FolderFileTree (live fileQuery leaf subscribe).
     list = filterFilesByExtensions(list, fileExtFilter);
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);

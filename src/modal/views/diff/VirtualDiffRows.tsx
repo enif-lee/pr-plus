@@ -300,6 +300,8 @@ export function FileHeaderRow(props: {
     ? FILE_FOLD_SHORTCUT.labelMac
     : FILE_FOLD_SHORTCUT.labelWin;
   const viewedKbd = fileHeaderViewedOptHintLabel(focused, isMac);
+  // Rename / move: show "old → new" like GitHub (old path is not highlighted).
+  const prevPath = row.previousFilePath || '';
 
   const headerEl = (
     <div
@@ -419,7 +421,9 @@ export function FileHeaderRow(props: {
         <code
           className="prp-file-header__path"
           dangerouslySetInnerHTML={{
-            __html: isSearchMatch
+            __html: (prevPath
+              ? `${escapeHtml(prevPath)}<span class="prp-file-header__rename-arrow"> → </span>`
+              : '') + (isSearchMatch
               ? markSearchInText(row.filePath || '', searchQuery, {
                   currentStart: isActiveHit
                     ? resolveActiveMarkStart(
@@ -432,7 +436,7 @@ export function FileHeaderRow(props: {
                       )
                     : null,
                 })
-              : escapeHtml(row.filePath || ''),
+              : escapeHtml(row.filePath || '')),
           }}
         />
         {!openable ? (
