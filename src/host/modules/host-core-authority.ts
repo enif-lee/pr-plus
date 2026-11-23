@@ -105,7 +105,16 @@
     /** auto | en | ko | ja | zh_CN — custom overrides GitHub page detect */
     uiLanguage: 'auto',
     timelineVisibility: { ...DEFAULT_TIMELINE_VISIBILITY },
+    /** merge | squash | rebase — last method picked in the merge box. */
+    lastMergeMethod: null as 'merge' | 'squash' | 'rebase' | null,
   };
+
+  function normalizeLastMergeMethod(raw: unknown): 'merge' | 'squash' | 'rebase' | null {
+    const v = String(raw ?? '')
+      .trim()
+      .toLowerCase();
+    return v === 'merge' || v === 'squash' || v === 'rebase' ? v : null;
+  }
 
   function normalizeListOpenMode(raw: unknown): 'modal' | 'page' {
     const v = String(raw ?? '')

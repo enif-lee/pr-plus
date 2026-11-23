@@ -36,6 +36,8 @@ export function MergeBox({
   onUpdateBranch,
   onDeleteHeadBranch,
   onSetDraftStage,
+  preferredMergeMethod = null,
+  onMergeMethodChange = null,
 }: {
   detail: any;
   ms: any;
@@ -45,6 +47,10 @@ export function MergeBox({
   onUpdateBranch?: () => void;
   onDeleteHeadBranch?: (() => void) | null;
   onSetDraftStage?: (stage: string) => void;
+  /** extensionPrefs.lastMergeMethod — default until the user picks on this PR. */
+  preferredMergeMethod?: MergeMethod | null;
+  /** (method) => void — persist a pick as the next PR's default. */
+  onMergeMethodChange?: ((method: MergeMethod) => void) | null;
 }) {
   const t = useT();
   const methods = useMemo(() => {
@@ -52,8 +58,10 @@ export function MergeBox({
     return base.map((m) => localizeMergeMethodRow(m.id, detail, t));
   }, [detail, t]);
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>(() =>
-    defaultMergeMethod(detail)
+    defaultMergeMethod(detail, preferredMergeMethod)
   );
+  /** Method chosen on the PR currently shown (reset on PR switch). */
+  const pickedForRef = useRef<number | null>(null);
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
   /** GitHub-style admin bypass opt-in (default off). */
   const [bypassRulesAccepted, setBypassRulesAccepted] = useState(false);
@@ -67,12 +75,18 @@ export function MergeBox({
 
   // Keep selection valid when repo settings load / change.
   useEffect(() => {
+    // Another PR: start from the last used method, not the previous PR's pick.
+    if (pickedForRef.current !== detail?.number) {
+      setMergeMethod(defaultMergeMethod(detail, preferredMergeMethod));
+      return;
+    }
     setMergeMethod((cur) => defaultMergeMethod(detail, cur));
   }, [
     detail?.allowMergeCommit,
     detail?.allowSquashMerge,
     detail?.allowRebaseMerge,
     detail?.number,
+    preferredMergeMethod,
   ]);
 
   // Always clear opt-in on PR switch (and when bypass is no longer offered).
@@ -324,6 +338,8 @@ export function MergeBox({
                           }`}
                           onClick={() => {
                             setMergeMethod(m.id);
+                            pickedForRef.current = detail?.number ?? null;
+                            onMergeMethodChange?.(m.id);
                             setMergeMenuOpen(false);
                           }
                           }

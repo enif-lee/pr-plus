@@ -723,7 +723,8 @@ export function sleepMs(ms: any) {
 }
 
 /**
- * Dual-modified paths since merge-base (base tip ∩ head) ≈ conflict file list.
+ * Dual-modified paths since merge-base (base tip ∩ head). Superset of the real
+ * conflict set: a file changed on both sides may still auto-merge.
  * Uses current base-branch tip (not stale pr.base.sha) so behind PRs work.
  * Soft-fails to [] on any error.
  *

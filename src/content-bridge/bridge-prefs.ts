@@ -20,6 +20,8 @@ export const DEFAULT_PREFS = {
   pluginEnabled: true,
   shortcutMonitorSize: 'small',
   conversationWidth: 'normal',
+  /** merge | squash | rebase — last method picked in the merge box. */
+  lastMergeMethod: null as 'merge' | 'squash' | 'rebase' | null,
   autoExpandOnFileNav: false,
   onboardingCompleted: false,
   /** auto | en | ko | ja | zh_CN — custom overrides GitHub page detect */
@@ -126,6 +128,14 @@ function normalizeTimelineVisibilityLocal(raw: any) {
   return base;
 }
 
+/** Last used merge box method; anything else (including absent) → null. */
+export function normalizeMergeMethodLocal(raw: unknown): 'merge' | 'squash' | 'rebase' | null {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return v === 'merge' || v === 'squash' || v === 'rebase' ? v : null;
+}
+
 /**
  * Content-side prefs normalize. Must keep keys the host/modal need for live
  * updates (uiLanguage, timelineVisibility, …). Stripping fields here made
@@ -167,6 +177,7 @@ export function normalizePrefsLocal(raw: any) {
     uiLanguage: normalizeUiLanguageLocal(src.uiLanguage),
     conversationWidth: ['narrow', 'normal', 'wide', 'full'].includes(src.conversationWidth)
       ? src.conversationWidth : 'normal',
+    lastMergeMethod: normalizeMergeMethodLocal(src.lastMergeMethod),
     timelineVisibility: normalizeTimelineVisibilityLocal(
       src.timelineVisibility ?? DEFAULT_PREFS.timelineVisibility
     ),

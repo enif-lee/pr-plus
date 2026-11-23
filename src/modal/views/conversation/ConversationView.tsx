@@ -84,7 +84,7 @@ import {
   type TimelineTipId,
 } from '@lib/conversation-timeline';
 import { snippetForComment } from '@lib/diff-snippet';
-import { buildMergeBoxStatus } from '@lib/merge-box-status';
+import { buildMergeBoxStatus, type MergeMethod } from '@lib/merge-box-status';
 import { BodyEditor } from '../composers/BodyEditor';
 import { MetaList } from './MetaList';
 import { AsideCommitsTimeline } from './AsideCommitsTimeline';
@@ -250,6 +250,10 @@ function ConversationViewImpl(props: any) {
     timelineVisibility = null,
     /** (nextMap) => void — patch global prefs when a tip is toggled */
     onTimelineVisibilityChange = null,
+    /** (method) => void — persist merge box pick as next default */
+    onMergeMethodChange = null,
+    /** extensionPrefs.lastMergeMethod — merge box default for this PR. */
+    preferredMergeMethod = null,
     reviewThreadsMeta = null,
     /** GraphQL timelineItems page meta (comments + system events). */
     timelineMeta = null,
@@ -2204,6 +2208,8 @@ function ConversationViewImpl(props: any) {
               onUpdateBranch={onUpdateBranch}
               onDeleteHeadBranch={onDeleteHeadBranch}
               onSetDraftStage={onSetDraftStage}
+              preferredMergeMethod={preferredMergeMethod}
+              onMergeMethodChange={onMergeMethodChange}
             />
           </div>
         )}

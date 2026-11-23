@@ -53,6 +53,8 @@ const DEFAULT_PREFS = {
   listOpenMode: 'modal',
   singleFileMode: false,
   treeView: true,
+  /** Last merge method picked in the merge box (reused when the repo allows it). */
+  lastMergeMethod: null as 'merge' | 'squash' | 'rebase' | null,
   /**
    * Master switch: when false, pr+ host/network features stay off.
    * Rate-limit auto-disable also flips this off until reset (user may re-enable).
@@ -106,6 +108,14 @@ function normalizeShortcutMonitorSizePref(raw: unknown): string {
 }
 
 /** /pulls open target: modal | page */
+/** Last used merge box method: merge | squash | rebase (null when never picked). */
+function normalizeMergeMethodPref(raw: unknown): 'merge' | 'squash' | 'rebase' | null {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return v === 'merge' || v === 'squash' || v === 'rebase' ? v : null;
+}
+
 function normalizeListOpenModePref(raw: unknown): 'modal' | 'page' {
   const v = String(raw ?? '')
     .trim()
@@ -228,6 +238,7 @@ function normalizePrefs(raw: any) {
         ? src.autoOpenEmbed
         : DEFAULT_PREFS.autoOpenEmbed,
     listOpenMode: normalizeListOpenModePref(src.listOpenMode),
+    lastMergeMethod: normalizeMergeMethodPref(src.lastMergeMethod),
     singleFileMode:
       typeof src.singleFileMode === 'boolean'
         ? src.singleFileMode

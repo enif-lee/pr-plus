@@ -627,6 +627,7 @@ export async function fetchIssueOrPrSummaries(owner: any, repo: any, numbers: an
 
 // ── GraphQL primary-point cost observation (e2e / debugging) ───────────
 export async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any, headSha: any, fetchImpl: any, token: any, ctx: any = null) {
+  // Returns dual-modified paths (superset of real conflicts); see http.ts doc.
   ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();

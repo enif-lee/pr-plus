@@ -332,6 +332,7 @@
           ),
           uiLanguage: normalizeUiLanguage(next.uiLanguage),
           conversationWidth: next.conversationWidth ?? 'normal',
+          lastMergeMethod: normalizeLastMergeMethod(next.lastMergeMethod),
           timelineVisibility: normalizeTimelineVisibilityLocal(
             next.timelineVisibility
           ),
@@ -498,6 +499,7 @@
             ),
             uiLanguage: normalizeUiLanguage(next?.uiLanguage),
             conversationWidth: next?.conversationWidth ?? 'normal',
+            lastMergeMethod: normalizeLastMergeMethod(next?.lastMergeMethod),
             timelineVisibility: normalizeTimelineVisibilityLocal(
               next?.timelineVisibility
             ),

@@ -58,6 +58,18 @@ describe('storage.normalizePrefs uiLanguage', () => {
       'auto'
     );
   });
+  test('lastMergeMethod: keep merge/squash/rebase, reject other → null', () => {
+    const storage = loadStorage();
+    if (!storage) return;
+    expect(storage.normalizePrefs({}).lastMergeMethod).toBeNull();
+    expect(storage.normalizePrefs({ lastMergeMethod: 'squash' }).lastMergeMethod).toBe(
+      'squash'
+    );
+    expect(storage.normalizePrefs({ lastMergeMethod: 'rebase' }).lastMergeMethod).toBe(
+      'rebase'
+    );
+    expect(storage.normalizePrefs({ lastMergeMethod: 'ff' }).lastMergeMethod).toBeNull();
+  });
 });
 
 describe('end-to-end pref → message (shipped pure path)', () => {

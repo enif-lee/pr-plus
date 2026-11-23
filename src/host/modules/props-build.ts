@@ -40,6 +40,28 @@
       openPulls,
       prefs: { ...prefs },
       /**
+       * Merge box method pick → extensionPrefs.lastMergeMethod, reused as the
+       * default on the next PR (when that repo allows it). Optimistic local
+       * merge; storage round-trip is best-effort.
+       */
+      onMergeMethodChange: (method: any) => {
+        const next = normalizeLastMergeMethod(method);
+        if (!next || prefs.lastMergeMethod === next) return;
+        prefs = { ...prefs, lastMergeMethod: next };
+        try {
+          void (globalThis as any).PRTreeStorage?.setExtensionPrefs?.({
+            lastMergeMethod: next,
+          }).then((full: any) => {
+            if (full && typeof full === 'object' && current.open) {
+              prefs = { ...prefs, lastMergeMethod: normalizeLastMergeMethod(full.lastMergeMethod) ?? next };
+              render();
+            }
+          }).catch(() => {});
+        } catch {
+          /* best-effort */
+        }
+      },
+      /**
        * Conversation timeline tip toggles → extensionPrefs.timelineVisibility.
        * Capture prevVis **before** optimistic write, then lazy-fetch system
        * events if a tip was re-enabled after partial-fetch skip. Storage watch

@@ -36,7 +36,11 @@ import {
   hasUnsavedModalInput,
   snapshotUnsavedModalInput,
 } from '../lib/unsaved-input';
-import { canUpdateBranch, coerceMergeMethod } from '../lib/merge-box-status';
+import {
+  canUpdateBranch,
+  coerceMergeMethod,
+  type MergeMethod,
+} from '../lib/merge-box-status';
 import { useThreadCommentsAndGap } from '../hooks/useThreadCommentsAndGap';
 import { useContextThreadActions } from '../hooks/useContextThreadActions';
 import { useSelectionKeyboard } from '../hooks/useSelectionKeyboard';
@@ -489,6 +493,8 @@ export function PrModalApp({
   prefs = null,
   /** Patch extensionPrefs.timelineVisibility from Conversation tips */
   onTimelineVisibilityChange = null,
+  /** (method) => void — persist merge box pick as next default */
+  onMergeMethodChange = null,
   /** 'modal' overlay (default) | 'embed' in-page under GitHub header */
   presentation = 'modal',
   shellChrome = null,
@@ -497,6 +503,7 @@ export function PrModalApp({
 }: any) {
   const reverseComments = prefs?.reverseComments !== false;
   const timelineVisibility = prefs?.timelineVisibility ?? null;
+  const preferredMergeMethod = (prefs?.lastMergeMethod as MergeMethod | null | undefined) ?? null;
   const conversationWidthLimit = conversationMaxWidth(prefs?.conversationWidth);
   /**
    * Plugin language: `auto` follows GitHub page locale; concrete codes override.
@@ -4652,6 +4659,10 @@ export function PrModalApp({
                 ? onTimelineVisibilityChange
                 : null
             }
+            onMergeMethodChange={
+              typeof onMergeMethodChange === 'function' ? onMergeMethodChange : null
+            }
+            preferredMergeMethod={preferredMergeMethod}
             reviewThreadsMeta={detail?.reviewThreadsMeta || null}
             timelineMeta={detail?.timelineMeta || null}
             searchQuery={undefined /* leaf useSearchGroup */}
