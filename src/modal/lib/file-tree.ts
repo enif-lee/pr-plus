@@ -423,15 +423,18 @@ export function isPureRenameFile(file: any): boolean {
 }
 
 /**
- * Drop pure renames / moves from a file list. Files renamed *with* content
- * changes, binaries and images (+0 −0 but not a rename) are kept.
+ * Drop pure renames / moves unless the path has review threads. Files renamed
+ * with content changes, binaries and images (+0 −0 but not a rename) are kept.
  *
  * @param {Array<object>} files
+ * @param {ReadonlyMap<string, number>} [threadCounts]
  * @returns {Array<object>}
  */
-export function filterFilesExcludePureRenames(files: any): any[] {
+export function filterFilesExcludePureRenames(files: any, threadCounts?: ReadonlyMap<string, number>): any[] {
   const list = Array.isArray(files) ? files : [];
-  return list.filter((f) => !isPureRenameFile(f));
+  return list.filter((f) =>
+    !isPureRenameFile(f) || (threadCounts?.get(f.filename || f.path) ?? 0) > 0
+  );
 }
 
 /**

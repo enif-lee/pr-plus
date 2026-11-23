@@ -1682,6 +1682,13 @@ export function PrModalApp({
     return new Map();
   }, [detail?.reviewComments]);
 
+  // Shared before user filters: a content-free rename is still useful when it
+  // has a review thread to show under its file header.
+  const diffEligibleFiles = useMemo(
+    () => filterFilesExcludePureRenames(annotatedFiles, threadCounts),
+    [annotatedFiles, threadCounts]
+  );
+
   const unresolvedThreadCounts = useMemo(() => {
     if (typeof countUnresolvedReviewThreadsByPath === 'function') {
       return countUnresolvedReviewThreadsByPath(detail?.reviewComments || []);
@@ -1703,7 +1710,7 @@ export function PrModalApp({
    */
   const reviewThreadTotals = useMemo(() => {
     const pathSet = new Set<string>();
-    for (const f of annotatedFiles || []) {
+    for (const f of diffEligibleFiles) {
       const p = f?.filename || f?.path;
       if (p) pathSet.add(String(p));
     }
@@ -1749,7 +1756,7 @@ export function PrModalApp({
       return countReviewThreadTotals(all, { allowedPaths: pathSet });
     }
     return { total: 0, unresolved: 0, resolved: 0, pendingThreads: 0 };
-  }, [detail?.reviewComments, annotatedFiles]);
+  }, [detail?.reviewComments, diffEligibleFiles]);
 
   /**
    * Resolve-status (Unresolved/Resolved/Pending) filter only.
@@ -1789,12 +1796,8 @@ export function PrModalApp({
    * Shared by Diff virtual list, file tree, prev/next file nav, and pathOrder.
    */
   const displayFiles = useMemo(() => {
-    let list = Array.isArray(annotatedFiles) ? annotatedFiles : [];
-    // GitHub lists a pure rename/move (+0 −0) but has no diff to show for it.
-    // Keep it out of the Diff list, file tree and prev/next file nav.
-    list = filterFilesExcludePureRenames(list);
     // Name query is applied in FolderFileTree (live fileQuery leaf subscribe).
-    list = filterFilesByExtensions(list, fileExtFilter);
+    let list = filterFilesByExtensions(diffEligibleFiles, fileExtFilter);
     list = filterFilesUnreadOnly(list, viewedPaths, fileUnreadOnly);
     if (typeof filterFilesCommentedOnly === 'function') {
       list = filterFilesCommentedOnly(list, threadCounts, fileCommentedOnly);
@@ -1805,7 +1808,7 @@ export function PrModalApp({
     }
     return list;
   }, [
-    annotatedFiles,
+    diffEligibleFiles,
     fileExtFilter,
     viewedPaths,
     fileUnreadOnly,
@@ -1813,8 +1816,8 @@ export function PrModalApp({
     threadCounts,
   ]);
 
-  /** Ext chips source: full annotated set (not narrowed by explorer filters). */
-  const reviewScopedFiles = annotatedFiles;
+  /** Ext chips source: eligible Diff files, not narrowed by explorer filters. */
+  const reviewScopedFiles = diffEligibleFiles;
 
   /**
    * Diff virtual list source. In single-file mode only the active (or first)

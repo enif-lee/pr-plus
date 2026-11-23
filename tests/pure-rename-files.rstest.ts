@@ -12,6 +12,7 @@ import {
   filterFilesExcludePureRenames,
   filesInTreeOrder,
   isPureRenameFile,
+  listFileExtensions,
 } from '../src/modal/lib/file-tree.ts';
 import { flattenFilesToVirtualRows } from '../src/modal/lib/diff-rows-core';
 
@@ -129,19 +130,56 @@ describe('Diff list / tree after excluding pure renames', () => {
 });
 
 describe('wiring (source gates)', () => {
-  test('PrModalShell filters pure renames inside displayFiles before other filters', () => {
+  test('PrModalShell derives one eligible Diff list from annotated files + thread counts', () => {
     const shell = fs.readFileSync(
       path.join(root, 'src/modal/app/PrModalShell.tsx'),
       'utf8'
     );
-    const start = shell.indexOf('const displayFiles = useMemo(() => {');
-    expect(start).toBeGreaterThan(-1);
-    const body = shell.slice(start, start + 900);
-    expect(body).toMatch(/filterFilesExcludePureRenames\(list\)/);
-    // Must run before the tree-order pass so hidden files never reach nav/tree.
-    expect(body.indexOf('filterFilesExcludePureRenames(list)')).toBeLessThan(
-      body.indexOf('filesInTreeOrder(list)')
+    expect(shell).toMatch(
+      /const diffEligibleFiles = useMemo\(\s*\(\) => filterFilesExcludePureRenames\(annotatedFiles, threadCounts\)/
     );
+    const body = shell.slice(
+      shell.indexOf('const displayFiles = useMemo(() => {'),
+      shell.indexOf('const displayFiles = useMemo(() => {') + 600
+    );
+    // Eligible list feeds name/ext/unread/commented filters, then tree order.
+    expect(body).toMatch(/filterFilesByExtensions\(diffEligibleFiles, fileExtFilter\)/);
+    expect(body).not.toMatch(/annotatedFiles/);
+    // Badges + ext chips share the same list, so counts and chips agree with Diff.
+    expect(shell).toMatch(/for \(const f of diffEligibleFiles\)/);
+    expect(shell).toMatch(/const reviewScopedFiles = diffEligibleFiles/);
+  });
+
+  test('pure rename with a review thread stays visible in Diff rows and nav', () => {
+    const commented = { ...pureRename, filename: 'src/utils/renamed-with-thread.ts' };
+    const threadCounts = new Map([[commented.filename, 1]]);
+    const eligible = filterFilesExcludePureRenames([pureRename, commented, modified], threadCounts);
+    expect(eligible.map((f: any) => f.filename)).toEqual([commented.filename, modified.filename]);
+    const comment = {
+      id: 1, path: commented.filename, line: null, body: 'file-level note', author: 'me',
+    };
+    const rows = flattenFilesToVirtualRows(eligible, 'unified', { reviewComments: [comment] });
+    const headerIndex = rows.findIndex((r: any) => r.kind === 'file-header' && r.filePath === commented.filename);
+    expect(headerIndex).toBeGreaterThan(-1);
+    // File-level thread renders directly under its header, even with no patch.
+    expect(rows[headerIndex + 1]).toMatchObject({
+      kind: 'inline-comment', filePath: commented.filename, commentId: 1, subjectType: 'file',
+    });
+    const paths: string[] = [];
+    const walk = (nodes: any[]) => {
+      for (const n of nodes) {
+        if (n.type === 'file') paths.push(n.path);
+        else walk(n.children || []);
+      }
+    };
+    walk(buildNestedFileTree(filesInTreeOrder(eligible)));
+    expect(paths).toContain(commented.filename);
+    expect(paths).not.toContain(pureRename.filename);
+  });
+
+  test('rename-only extensions leave the chip list', () => {
+    expect(listFileExtensions(filterFilesExcludePureRenames([pureRename, modified])))
+      .toEqual(['ts']);
   });
 
   test('file header renders the previous path through escapeHtml (no raw HTML)', () => {
