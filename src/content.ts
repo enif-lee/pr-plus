@@ -409,71 +409,8 @@
         }
         return storage.setExtensionPrefs(patch);
       };
-      /**
-       * Content scripts have `storage` permission — write the one-shot flag
-       * directly so we do not depend on a woken service worker for completion.
-       */
-      const ONBOARDING_KEY = 'onboardingCompleted';
-      const chromeApi = () => (globalThis as any).chrome;
-      const readOnboardingLocal = () =>
-        new Promise((resolve) => {
-          try {
-            const area = chromeApi()?.storage?.local;
-            if (!area?.get) {
-              resolve(null);
-              return;
-            }
-            area.get([ONBOARDING_KEY, 'extensionPrefs'], (result: any) => {
-              if (typeof result?.[ONBOARDING_KEY] === 'boolean') {
-                resolve(Boolean(result[ONBOARDING_KEY]));
-                return;
-              }
-              const prefs = result?.extensionPrefs;
-              if (prefs && typeof prefs.onboardingCompleted === 'boolean') {
-                resolve(Boolean(prefs.onboardingCompleted));
-                return;
-              }
-              resolve(null);
-            });
-          } catch {
-            resolve(null);
-          }
-        });
-      const writeOnboardingLocal = (completed: any) =>
-        new Promise((resolve) => {
-          try {
-            const area = chromeApi()?.storage?.local;
-            if (!area?.set) {
-              resolve(false);
-              return;
-            }
-            area.get(['extensionPrefs'], (cur: any) => {
-              const prev =
-                cur?.extensionPrefs && typeof cur.extensionPrefs === 'object'
-                  ? cur.extensionPrefs
-                  : {};
-              area.set(
-                {
-                  [ONBOARDING_KEY]: Boolean(completed),
-                  extensionPrefs: {
-                    ...prev,
-                    onboardingCompleted: Boolean(completed),
-                  },
-                },
-                () => {
-                  const err = chromeApi()?.runtime?.lastError;
-                  resolve(!err);
-                }
-              );
-            });
-          } catch {
-            resolve(false);
-          }
-        });
 
       const isOnboardingDone = async () => {
-        const local = await readOnboardingLocal();
-        if (local != null) return Boolean(local);
         if (typeof storage?.getOnboardingCompleted === 'function') {
           try {
             return Boolean(await storage.getOnboardingCompleted());
@@ -490,9 +427,6 @@
         }
       };
       const markOnboardingDone = async () => {
-        // 1) Direct storage write (reliable without SW)
-        if (await writeOnboardingLocal(true)) return true;
-        // 2) Bridge / SW path
         try {
           if (typeof storage?.setOnboardingCompleted === 'function') {
             if (Boolean(await storage.setOnboardingCompleted(true))) return true;
@@ -509,12 +443,7 @@
         } catch {
           /* continue */
         }
-        try {
-          const next = await setPrefs({ onboardingCompleted: true });
-          return Boolean(next?.onboardingCompleted);
-        } catch {
-          return false;
-        }
+        return false;
       };
 
       onboardingTour = api.createOnboardingTour({

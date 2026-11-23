@@ -1,7 +1,7 @@
 /**
  * PAT storage helpers.
  *
- * Storage location: chrome.storage.local (extension-private, not page-accessible,
+ * Storage location: chrome.storage.local (trusted extension contexts only,
  * not synced to Google account).
  *
  * Keys:
@@ -10,9 +10,8 @@
  * - "extensionPrefs"  — non-secret UI prefs (no tokens)
  *
  * Security notes:
- * - Prefer reading tokens only from the extension service worker / popup.
- * - Content scripts must not call getGithubToken() / getTokenForWebHost();
- *   use background messaging.
+ * - The service worker restricts the area with setAccessLevel.
+ * - Content scripts access settings and masked PAT status via background messaging.
  * - UI only ever displays a mask, never the full secret after save.
  */
 

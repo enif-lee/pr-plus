@@ -276,11 +276,11 @@ The popup also lists **Chrome permissions** and recommended **PAT scopes** (clas
 
 | Item | Details |
 |------|---------|
-| Storage | `chrome.storage.local` (extension-only, not synced) |
-| Access | **Service worker only** holds the raw token — never exposed to content scripts |
+| Storage | `chrome.storage.local` (trusted extension contexts only, not synced) |
+| Access | The service worker uses the saved token for API calls; content scripts receive masked status only |
 | UI | After save, only a mask is shown (`••••` + last 4 chars) |
 | Classic scopes | `repo` for full PR features; add `notifications` for Subscribe |
-| Fine-grained | **Pull requests** Read & Write on target repos; **Contents** Read & Write if applying suggestions or attaching non-image files. Images/videos paste into comments via the GitHub page session (`user-attachments`), not Contents. |
+| Fine-grained | **Pull requests** Read & Write on target repos; **Commit statuses** and **Checks** Read for the CI panel; **Contents** Read & Write if applying suggestions or attaching non-image files. Images/videos paste into comments via the GitHub page session (`user-attachments`), not Contents. |
 
 ---
 

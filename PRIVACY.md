@@ -10,9 +10,9 @@ pr+ is an in-page GitHub pull request shell: a stack tree on `/pulls`, plus Conv
 
 ## 1. Developer contact
 
-- **Publisher / developer:** enif-lee  
-- **Repository:** https://github.com/enif-lee/pr-plus  
-- **Contact email:** enif.lee@gmail.com  
+- **Publisher / developer:** enif-lee
+- **Repository:** https://github.com/enif-lee/pr-plus
+- **Contact email:** enif.lee@gmail.com
 
 For privacy questions or data-deletion requests related to the Extension, contact the email above.
 
@@ -24,8 +24,8 @@ For privacy questions or data-deletion requests related to the Extension, contac
 
 When you visit a GitHub pull request list or an individual pull request (for example `https://github.com/{owner}/{repo}/pulls` or `/pull/{n}`), the Extension may read **page content in the browser** (such as PR row markup and related UI text) solely to:
 
-- reorder and indent rows into a stack tree  
-- rebuild the secondary metadata line (PR number, author, relative time, draft/review badges, branch chips, optional magic links)  
+- reorder and indent rows into a stack tree
+- rebuild the secondary metadata line (PR number, author, relative time, draft/review badges, branch chips, optional magic links)
 - open the Conversation, Diff, and merge shell (timeline, review threads, file diffs, merge box)
 
 This processing happens **locally in your browser**.
@@ -34,7 +34,7 @@ This processing happens **locally in your browser**.
 
 If you choose to save a GitHub PAT in the Extension popup, we process:
 
-- the **token string you provide**  
+- the **token string you provide**
 - a **masked display form** in the UI after save (for example dots plus the last few characters)
 
 You are not required to provide a PAT for public repositories. A PAT is optional and intended for private repository access and certain GitHub API features (such as repository autolink rules).
@@ -43,11 +43,11 @@ You are not required to provide a PAT for public repositories. A PAT is optional
 
 We do not intentionally collect:
 
-- your name, email, or profile beyond what GitHub already shows on pages you open  
-- payment or financial data  
-- precise location  
-- contacts or personal messages  
-- browsing history outside GitHub pages and user-granted Connected sites  
+- your name, email, or profile beyond what GitHub already shows on pages you open
+- payment or financial data
+- precise location
+- contacts or personal messages
+- browsing history outside GitHub pages and user-granted Connected sites
 - content of Linear or Jira tickets (the page only passes a GitHub PR identity to open)
 
 We do **not** operate a first-party analytics backend that tracks your usage of pr+.
@@ -70,10 +70,10 @@ Specifically:
 
 We do **not** use this data for:
 
-- advertising or remarketing  
-- selling data  
-- credit, lending, or insurance decisions  
-- features unrelated to the single purpose above  
+- advertising or remarketing
+- selling data
+- credit, lending, or insurance decisions
+- features unrelated to the single purpose above
 
 ---
 
@@ -81,17 +81,17 @@ We do **not** use this data for:
 
 ### 4.1 Local storage
 
-- Optional PAT is stored in **`chrome.storage.local`** on your device.  
-- It is **not** stored with `chrome.storage.sync` (it is not synced through your Google account by this Extension).  
-- The raw token is used by the Extension **service worker** only. Content scripts do not receive the raw token.  
+- Optional PAT is stored in **`chrome.storage.local`** on your device.
+- It is **not** stored with `chrome.storage.sync` (it is not synced through your Google account by this Extension).
+- The **service worker** uses the saved token for API calls. `chrome.storage.local` is restricted to trusted extension contexts; content scripts get settings and masked token status through messages, not the raw stored token.
 - A sanitized PR-detail snapshot cache (title, conversation, file list) is stored in **extension-origin IndexedDB** owned by the service worker, so GitHub and granted Connected sites share the same cache. It is not stored in the page’s origin database.
 
 ### 4.2 Network requests
 
 The Extension may send network requests only to:
 
-- **`https://github.com/*`** — as part of normal page interaction / same-origin needs on GitHub  
-- **`https://api.github.com/*`** — REST API calls for pull request (and related) metadata, including an `Authorization` header when a PAT is configured  
+- **`https://github.com/*`** — as part of normal page interaction / same-origin needs on GitHub
+- **`https://api.github.com/*`** — REST API calls for pull request (and related) metadata, including an `Authorization` header when a PAT is configured
 
 We do **not** send your PAT or PR page content to a developer-operated server for pr+.
 
@@ -103,8 +103,8 @@ The only third party involved in API data access is **GitHub**, when the Extensi
 
 ## 5. Sharing and sale of data
 
-- We **do not sell** user data.  
-- We **do not share** user data with data brokers or advertisers.  
+- We **do not sell** user data.
+- We **do not share** user data with data brokers or advertisers.
 - We do not transfer user data for purposes unrelated to providing the Extension’s core functionality.
 
 ---
@@ -113,16 +113,16 @@ The only third party involved in API data access is **GitHub**, when the Extensi
 
 You can:
 
-1. **Decline to save a PAT** — public PR lists can still work without one.  
-2. **Clear a saved PAT** — use **Clear** in the Extension popup.  
-3. **Uninstall the Extension** — removes the Extension; Chrome deletes extension data according to Chrome’s uninstall behavior.  
+1. **Decline to save a PAT** — public PR lists can still work without one.
+2. **Clear a saved PAT** — use **Clear** in the Extension popup.
+3. **Uninstall the Extension** — removes the Extension; Chrome deletes extension data according to Chrome’s uninstall behavior.
 4. **Limit GitHub access** — use a fine-grained PAT with the minimum scopes (for example Pull requests read) and revoke it anytime in GitHub settings.
 
 ---
 
 ## 7. Data retention
 
-- PAT: retained in `chrome.storage.local` until you clear it or uninstall the Extension.  
+- PAT: retained in `chrome.storage.local` until you clear it or uninstall the Extension.
 - Page/API data: processed in memory to render the current page; a local extension IndexedDB cache of PR snapshots is kept on-device until you clear it or uninstall. Not retained on developer servers.
 
 ---
@@ -131,9 +131,9 @@ You can:
 
 We design the Extension so that:
 
-- the PAT is not injected into page JavaScript context  
-- API authentication is performed in the service worker  
-- the popup shows only a masked form of the token after save  
+- the PAT is not injected into page JavaScript context
+- API authentication is performed in the service worker
+- the popup shows only a masked form of the token after save
 
 No method of electronic storage or transmission is 100% secure. Protect your device and GitHub account, and use least-privilege tokens.
 
@@ -161,14 +161,14 @@ We may update this Privacy Policy from time to time. The **Last updated** date a
 
 For Chrome Web Store privacy practices:
 
-- **Single purpose:** GitHub pull request review — list stack-tree plus Conversation, Diff, and merge processing.  
-- **Remote code:** Not used; all extension code is packaged locally.  
+- **Single purpose:** GitHub pull request review — list stack-tree plus Conversation, Diff, and merge processing.
+- **Remote code:** Not used; all extension code is packaged locally.
 - **Host permissions:** `github.com` for UI enhancement; `api.github.com` for PR conversation, diff, and merge APIs. Optional HTTPS hosts for GitHub Enterprise and user-granted Connected sites (Linear overlay / Jira launcher). Localhost optional for local agents: loopback pages can reach pr+ only after the user adds Localhost under Connected sites. Not a Linear/Jira data partnership.
-- **storage permission:** Optional local PAT storage for private-repo API access.  
+- **storage permission:** Optional local PAT storage for private-repo API access.
 
 ---
 
 ## 13. Contact
 
-Questions about this Privacy Policy: **enif.lee@gmail.com**  
-Project homepage: https://github.com/enif-lee/pr-plus  
+Questions about this Privacy Policy: **enif.lee@gmail.com**
+Project homepage: https://github.com/enif-lee/pr-plus

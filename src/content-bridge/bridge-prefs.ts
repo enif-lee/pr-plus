@@ -223,21 +223,6 @@ export var PRTreeStorage = {
     return () => chrome.runtime.onMessage.removeListener(listener);
   },
   async getExtensionPrefs() {
-    // Prefer chrome.storage.local directly so new pref keys (uiLanguage, …)
-    // work even if the service worker bundle is still stale (unpacked SW cache).
-    try {
-      const area = (globalThis as any).chrome?.storage?.local;
-      if (area?.get) {
-        const raw = await new Promise((resolve) => {
-          area.get(['extensionPrefs'], (result: any) => {
-            resolve(result?.extensionPrefs);
-          });
-        });
-        return normalizePrefsLocal(raw);
-      }
-    } catch {
-      /* fall through to SW */
-    }
     try {
       const res = await send({ type: MSG.PREFS_GET });
       if (res?.ok && res.prefs) return normalizePrefsLocal(res.prefs);
@@ -248,35 +233,6 @@ export var PRTreeStorage = {
   },
   async setExtensionPrefs(patch: any) {
     const patchObj = patch && typeof patch === 'object' ? patch : {};
-    // Direct storage write with content-side normalize (authoritative for new keys).
-    try {
-      const area = (globalThis as any).chrome?.storage?.local;
-      if (area?.get && area?.set) {
-        const prevRaw = await new Promise((resolve) => {
-          area.get(['extensionPrefs'], (result: any) => {
-            resolve(result?.extensionPrefs);
-          });
-        });
-        const next = normalizePrefsLocal({
-          ...normalizePrefsLocal(prevRaw),
-          ...patchObj,
-        });
-        await new Promise((resolve, reject) => {
-          area.set({ extensionPrefs: next }, () => {
-            const err = (globalThis as any).chrome?.runtime?.lastError;
-            if (err) reject(err);
-            else resolve(undefined);
-          });
-        });
-        // Do NOT re-send PREFS_SET through SW after a direct storage write:
-        // a stale SW normalizePrefs can drop new keys (uiLanguage) and overwrite
-        // chrome.storage, undoing this write. storage.onChanged is enough for
-        // host/content watchers; SW rate-limit mem is updated on next PREFS_GET.
-        return next;
-      }
-    } catch {
-      /* fall through to SW-only path */
-    }
     const res = await send({
       type: MSG.PREFS_SET,
       prefs: patchObj as any,
@@ -314,46 +270,15 @@ export var PRTreeStorage = {
   watchExtensionPrefs(onChange: any) {
     if (typeof onChange !== 'function') return () => {};
     const chromeApi = (globalThis as any).chrome;
-    const unsubs: Array<() => void> = [];
-
-    // Primary: storage.onChanged — sees full object even when SW broadcast is stale
-    if (chromeApi?.storage?.onChanged) {
-      const storageListener = (changes: any, areaName: string) => {
-        if (areaName !== 'local' || !changes?.extensionPrefs) return;
-        onChange(normalizePrefsLocal(changes.extensionPrefs.newValue));
-      };
-      chromeApi.storage.onChanged.addListener(storageListener);
-      unsubs.push(() =>
-        chromeApi.storage.onChanged.removeListener(storageListener)
-      );
-    }
-
-    // Secondary: SW broadcast (may omit new keys if SW is stale — re-read storage)
-    if (chromeApi?.runtime?.onMessage) {
-      const msgListener = (message: any) => {
-        if (message?.type === MSG.PREFS_CHANGED) {
-          // Prefer a fresh local read so uiLanguage is never dropped by old SW
-          void PRTreeStorage.getExtensionPrefs().then((prefs) =>
-            onChange(prefs)
-          );
-        }
-        return false;
-      };
-      chromeApi.runtime.onMessage.addListener(msgListener);
-      unsubs.push(() =>
-        chromeApi.runtime.onMessage.removeListener(msgListener)
-      );
-    }
-
-    return () => {
-      for (const u of unsubs) {
-        try {
-          u();
-        } catch {
-          /* ignore */
-        }
+    if (!chromeApi?.runtime?.onMessage) return () => {};
+    const listener = (message: any) => {
+      if (message?.type === MSG.PREFS_CHANGED && message.prefs) {
+        onChange(normalizePrefsLocal(message.prefs));
       }
+      return false;
     };
+    chromeApi.runtime.onMessage.addListener(listener);
+    return () => chromeApi.runtime.onMessage.removeListener(listener);
   },
 };
 

@@ -13,7 +13,7 @@ import {
 } from './sw-rate-limit';
 import { getConnectedSites } from './sw-connected-sites';
 
-export function broadcastToGithubTabs(message: any) {
+export function broadcastToGithubTabs(message: any, includeConnected = false) {
   // Notify extension pages / open content scripts without sending secrets.
   // sendMessage may not return a Promise on all runtimes — never assume .catch.
   try {
@@ -24,9 +24,13 @@ export function broadcastToGithubTabs(message: any) {
     /* ignore */
   }
   try {
-    registeredEnterpriseHosts().then((hosts) => {
-      const url = githubTabUrlPatterns(hosts);
-      chrome.tabs.query({ url }, (tabs: any) => {
+    Promise.all([
+      registeredEnterpriseHosts(),
+      includeConnected ? getConnectedSites().catch((): null => null) : null,
+    ]).then(([hosts, sites]): void => {
+      const url = [...githubTabUrlPatterns(hosts), ...(sites?.origins || [])];
+      chrome.tabs.query({ url }, (tabs: any): void => {
+        void chrome.runtime.lastError;
         for (const tab of tabs || []) {
           if (tab.id == null) continue;
           try {
@@ -38,7 +42,7 @@ export function broadcastToGithubTabs(message: any) {
           }
         }
       });
-    });
+    }).catch(() => {});
   } catch {
     /* ignore */
   }
@@ -49,7 +53,7 @@ export function broadcastTokenChanged() {
 }
 
 export function broadcastPrefsChanged(prefs: any) {
-  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs });
+  broadcastToGithubTabs({ type: MSG.PREFS_CHANGED, prefs }, true);
 }
 
 /**
@@ -63,7 +67,7 @@ export function clearDetailCacheOnGithubTabs() {
       Promise.all([
         registeredEnterpriseHosts(),
         getConnectedSites().catch(() => ({ origins: [] as string[] })),
-      ]).then(([hosts, sites]) => {
+      ]).then(([hosts, sites]): void => {
         const url = [
           ...githubTabUrlPatterns(hosts),
           ...((sites && sites.origins) || []),

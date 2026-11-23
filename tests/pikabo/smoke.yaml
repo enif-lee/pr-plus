@@ -40,3 +40,56 @@ tests:
       - expect:
           equals: '1'
           description: content script stamped html[data-prp-content]
+
+  # chrome.storage.local is TRUSTED_CONTEXTS only: the SW reads/writes it, content
+  # scripts reach it through PREFS_GET/SET and ONBOARDING_GET/SET messages instead.
+  # The content-script probe runs in the extension's isolated world via scripting.
+  - name: storage.local is trusted-contexts only
+    steps:
+      - wait: 1500
+      - eval:
+          in: worker
+          script: >-
+            (async () => {
+              const send = (m) => new Promise((resolve) => chrome.runtime.sendMessage(m, (r) => {
+                void chrome.runtime.lastError; resolve(r);
+              }));
+              const tabId = (await chrome.tabs.query({}))
+                .find((t) => /^https:\/\/github\.com\//.test(t.url || t.pendingUrl || '')).id;
+              const inContent = (func) => chrome.scripting.executeScript({ target: { tabId }, func })
+                .then((r) => r[0].result);
+              const storageOk = () => new Promise((resolve) => chrome.storage.local.get('extensionPrefs', resolve));
+              const results = await Promise.all([
+                new Promise((resolve) => chrome.storage.local.set({ extensionPrefs: { uiLanguage: 'ko' } }, () => {
+                  storageOk().then((v) => resolve('sw:' + v.extensionPrefs.uiLanguage));
+                })),
+                inContent(() => new Promise((resolve) => {
+                  try {
+                    chrome.storage.local.get('extensionPrefs', () => {
+                      resolve('content:' + (chrome.runtime.lastError ? 'denied' : 'allowed'));
+                    });
+                  } catch (e) { resolve('content:denied'); }
+                })),
+                inContent(() => new Promise((resolve) => {
+                  chrome.runtime.sendMessage({ type: 'PR_TREE_PREFS_GET' }, (r) => {
+                    void chrome.runtime.lastError;
+                    resolve('prefs:' + Boolean(r?.ok && r.prefs?.uiLanguage === 'ko'));
+                  });
+                })),
+                inContent(() => new Promise((resolve) => {
+                  chrome.runtime.sendMessage({ type: 'PR_TREE_ONBOARDING_SET', completed: true }, () => {
+                    void chrome.runtime.lastError;
+                    chrome.runtime.sendMessage({ type: 'PR_TREE_ONBOARDING_GET' }, (r) => {
+                      void chrome.runtime.lastError;
+                      resolve('onboarding:' + (r?.completed === true));
+                    });
+                  });
+                })),
+              ]);
+              await send({ type: 'PR_TREE_PREFS_SET', prefs: {} });
+              await send({ type: 'PR_TREE_ONBOARDING_SET', completed: false });
+              return results.join(' | ');
+            })()
+      - expect:
+          description: SW owns storage; content script denied direct access; messages round-trip
+          equals: sw:ko | content:denied | prefs:true | onboarding:true

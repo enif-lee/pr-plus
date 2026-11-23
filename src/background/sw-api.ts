@@ -21,6 +21,16 @@ try {
   /* bundled classic may already include deps */
 }
 
+// Reapply on each cold wake, including install/update and browser restart.
+// Keep listener registration synchronous; content reads settings via RPC.
+try {
+  void Promise.resolve(
+    chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' })
+  ).catch(() => {});
+} catch {
+  /* storage API unavailable */
+}
+
 export * from './sw-enterprise';
 export * from './sw-broadcast';
 export * from './sw-rate-limit';

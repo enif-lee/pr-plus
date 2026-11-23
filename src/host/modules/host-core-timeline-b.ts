@@ -302,24 +302,7 @@
 
   async function refreshPrefs() {
     try {
-      // Prefer direct storage read (same as bridge) so uiLanguage is never lost
-      // when SW PREFS_GET is stale. Fall back to bridge getExtensionPrefs.
-      let next: any = null;
-      try {
-        const area = (globalThis as any).chrome?.storage?.local;
-        if (area?.get) {
-          next = await new Promise((resolve) => {
-            area.get(['extensionPrefs'], (result: any) => {
-              resolve(result?.extensionPrefs || null);
-            });
-          });
-        }
-      } catch {
-        next = null;
-      }
-      if (!next || typeof next !== 'object') {
-        next = await (globalThis as any).PRTreeStorage?.getExtensionPrefs?.();
-      }
+      const next = await (globalThis as any).PRTreeStorage?.getExtensionPrefs?.();
       if (next && typeof next === 'object') {
         prefs = {
           reverseComments: next.reverseComments !== false,
