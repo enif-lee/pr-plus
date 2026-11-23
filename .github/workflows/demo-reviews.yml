@@ -3,9 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run'
+        description: 'Print the plan without posting any reviews'
         required: false
-        default: 'false'
+        type: boolean
+        default: true
 
 jobs:
   submit-demo-reviews:
@@ -16,6 +17,8 @@ jobs:
     steps:
       - name: Submit demo reviews
         uses: actions/github-script@v7
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         with:
           script: |
             const owner = context.repo.owner;
@@ -29,6 +32,10 @@ jobs:
               { number: 9, event: 'APPROVE', body: 'Demo: approved.' },
             ];
             for (const item of plan) {
+              if (process.env.DRY_RUN !== 'false') {
+                console.log(`DRY RUN ${owner}/${repo}#${item.number} ${item.event}`);
+                continue;
+              }
               try {
                 await github.rest.pulls.createReview({
                   owner,
