@@ -32,6 +32,7 @@ import {
   fetchMinimizableStates,
   fetchReactableReactionGroups,
 } from './reactions';
+import { haveSeparatedEdits, type ComparePatch } from './conflict-patch';
 
 export async function fetchPrIssueComments(owner: any, repo: any, number: any, fetchImpl: any, token: any = null, ctx: any = null) {
   ctx = normalizeApiCtx(ctx);
@@ -627,7 +628,8 @@ export async function fetchIssueOrPrSummaries(owner: any, repo: any, numbers: an
 
 // ── GraphQL primary-point cost observation (e2e / debugging) ───────────
 export async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any, headSha: any, fetchImpl: any, token: any, ctx: any = null) {
-  // Returns dual-modified paths (superset of real conflicts); see http.ts doc.
+  // Compare has no per-file merge result. Keep dual-modified candidates unless
+  // the complete text patches show separated edits.
   ctx = normalizeApiCtx(ctx);
   const o = String(owner || '').trim();
   const r = String(repo || '').trim();
@@ -662,15 +664,16 @@ export async function fetchConflictFilePaths(owner: any, repo: any, baseRef: any
         token
       ),
     ]);
-    const onBase = new Set(
-      (Array.isArray(baseSide?.files) ? baseSide.files : [])
-        .map((f: any) => String(f?.filename || f?.previous_filename || '').trim())
-        .filter(Boolean)
-    );
+    const onBase = new Map<string, ComparePatch>();
+    for (const f of Array.isArray(baseSide?.files) ? baseSide.files : []) {
+      const path = String(f?.filename || f?.previous_filename || '');
+      if (path) onBase.set(path, f);
+    }
     const conflicts = [];
     for (const f of Array.isArray(headSide?.files) ? headSide.files : []) {
-      const path = String(f?.filename || '').trim();
-      if (path && onBase.has(path)) conflicts.push(path);
+      const path = String(f?.filename || '');
+      const baseFile = onBase.get(path);
+      if (baseFile && !haveSeparatedEdits(baseFile, f)) conflicts.push(path);
     }
     return conflicts;
   } catch (err) {

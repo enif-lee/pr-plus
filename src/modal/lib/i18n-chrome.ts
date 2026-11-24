@@ -470,7 +470,7 @@ export const chromeEn: MessageCatalog = {
   open_with_prp_title: 'Open with pr+ (⌥⇧E)',
   cta_resolve_conflicts: 'Resolve conflicts',
   merge_aria_status: 'Merge status',
-  merge_aria_conflict_files: 'Conflicting files',
+  merge_aria_conflict_files: 'Files with possible conflicts',
   merge_aria_method: 'Merge method',
   merge_status_merged_headline: 'Pull request successfully merged and closed',
   merge_status_merged_helper: 'This pull request has been merged.',
@@ -485,9 +485,9 @@ export const chromeEn: MessageCatalog = {
   merge_status_conflicts_helper:
     'Use the web editor or the command line to resolve conflicts before continuing.',
   merge_status_conflicts_files_one:
-    '1 file was changed on both branches; the conflict is in this file.',
+    '1 file may have conflicts. Open the web editor for the exact list.',
   merge_status_conflicts_files_n:
-    '$count$ files were changed on both branches. Not all of them conflict — open the web editor to see the exact set.',
+    '$count$ files may have conflicts. Open the web editor for the exact list.',
   merge_status_blocked_headline: 'Merging is blocked',
   merge_status_blocked_helper:
     'Fix failing checks, obtain required reviews, or update the branch, then try again.',
@@ -768,7 +768,7 @@ export const chromeKo: MessageCatalog = {
   open_with_prp_title: 'pr+로 열기 (⌥⇧E)',
   cta_resolve_conflicts: '충돌 해결',
   merge_aria_status: '머지 상태',
-  merge_aria_conflict_files: '충돌 파일',
+  merge_aria_conflict_files: '충돌 후보 파일',
   merge_aria_method: '머지 방법',
   merge_status_merged_headline: '풀 리퀘스트가 머지되어 닫혔습니다',
   merge_status_merged_helper: '이 풀 리퀘스트는 머지되었습니다.',
@@ -782,9 +782,9 @@ export const chromeKo: MessageCatalog = {
   merge_status_conflicts_helper:
     '계속하기 전에 웹 편집기 또는 명령줄에서 충돌을 해결하세요.',
   merge_status_conflicts_files_one:
-    '양쪽 브랜치에서 수정된 파일 1개입니다. 충돌은 이 파일에서 발생했습니다.',
+    '충돌 후보 파일 1개입니다. 정확한 목록은 웹 편집기에서 확인하세요.',
   merge_status_conflicts_files_n:
-    '양쪽 브랜치에서 수정된 파일 $count$개입니다. 모두 충돌하는 것은 아니며, 정확한 목록은 웹 편집기에서 확인하세요.',
+    '충돌 후보 파일 $count$개입니다. 정확한 목록은 웹 편집기에서 확인하세요.',
   merge_status_blocked_headline: '머지가 차단되었습니다',
   merge_status_blocked_helper:
     '실패한 체크를 고치거나 필수 리뷰를 받거나 브랜치를 업데이트한 뒤 다시 시도하세요.',
@@ -1061,7 +1061,7 @@ export const chromeJa: MessageCatalog = {
   open_with_prp_title: 'pr+ で開く (⌥⇧E)',
   cta_resolve_conflicts: 'コンフリクトを解決',
   merge_aria_status: 'マージ状態',
-  merge_aria_conflict_files: '競合ファイル',
+  merge_aria_conflict_files: '競合の可能性があるファイル',
   merge_aria_method: 'マージ方法',
   merge_status_merged_headline: 'プルリクエストはマージされ閉じられました',
   merge_status_merged_helper: 'このプルリクエストはマージ済みです。',
@@ -1076,9 +1076,9 @@ export const chromeJa: MessageCatalog = {
   merge_status_conflicts_helper:
     '続行する前に Web エディタまたはコマンドラインでコンフリクトを解決してください。',
   merge_status_conflicts_files_one:
-    '両方のブランチで変更されたファイルが 1 件です。競合はこのファイルで発生しています。',
+    '競合の可能性があるファイルは 1 件です。正確な一覧は Web エディタで確認してください。',
   merge_status_conflicts_files_n:
-    '両方のブランチで変更されたファイルが $count$ 件です。すべてが競合しているわけではありません。正確な一覧は Web エディタで確認してください。',
+    '競合の可能性があるファイルは $count$ 件です。正確な一覧は Web エディタで確認してください。',
   merge_status_blocked_headline: 'マージがブロックされています',
   merge_status_blocked_helper:
     '失敗したチェックの修正、必須レビューの取得、またはブランチ更新の後にもう一度お試しください。',
@@ -1358,7 +1358,7 @@ export const chromeZh: MessageCatalog = {
   open_with_prp_title: '用 pr+ 打开 (⌥⇧E)',
   cta_resolve_conflicts: '解决冲突',
   merge_aria_status: '合并状态',
-  merge_aria_conflict_files: '冲突文件',
+  merge_aria_conflict_files: '可能存在冲突的文件',
   merge_aria_method: '合并方式',
   merge_status_merged_headline: '拉取请求已成功合并并关闭',
   merge_status_merged_helper: '此拉取请求已合并。',
@@ -1371,9 +1371,9 @@ export const chromeZh: MessageCatalog = {
   merge_status_conflicts_helper:
     '请先使用 Web 编辑器或命令行解决冲突后再继续。',
   merge_status_conflicts_files_one:
-    '有 1 个文件在两个分支上都被修改，冲突就发生在这个文件中。',
+    '有 1 个文件可能存在冲突。请在 Web 编辑器中查看确切列表。',
   merge_status_conflicts_files_n:
-    '有 $count$ 个文件在两个分支上都被修改。并非全部冲突，准确列表请在 Web 编辑器中查看。',
+    '有 $count$ 个文件可能存在冲突。请在 Web 编辑器中查看确切列表。',
   merge_status_blocked_headline: '合并已被阻止',
   merge_status_blocked_helper:
     '请修复失败的检查、获取必需审阅或更新分支后再试。',

@@ -649,7 +649,7 @@ export function buildMergeBoxStatus(detail: any): MergeBoxStatus {
     const n = conflictFiles.length;
     const helper =
       n > 0
-        ? `Use the web editor or the command line to resolve conflicts before continuing. ${n} conflicting file${n === 1 ? '' : 's'} listed below.`
+        ? `Use the web editor or the command line to resolve conflicts before continuing. ${n} file${n === 1 ? '' : 's'} with possible conflicts listed below.`
         : 'Use the web editor or the command line to resolve conflicts before continuing.';
     return {
       kind: 'conflicts',
