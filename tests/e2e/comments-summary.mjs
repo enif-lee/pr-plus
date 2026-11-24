@@ -68,9 +68,36 @@ try {
   await fixture('partial');
   await summary.getByText('3 not loaded', { exact: true }).waitFor();
   assert.equal(await summary.locator('.prp-comment-summary__segment--unknown').getAttribute('style'), 'width: 20%;');
+  await page.setViewportSize({ width: 800, height: 1000 });
+  const expandedRightGutter = await summary.evaluate(el =>
+    el.closest('.prp-conversation').getBoundingClientRect().right - el.getBoundingClientRect().right
+  );
+  assert(Math.abs(expandedRightGutter - 18) <= 1, `incorrect expanded stacked gutter: ${expandedRightGutter}`);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('button', { name: 'Collapse metadata panel', exact: true }).click();
   await page.locator('.prp-comment-summary--compact').getByText('3 not loaded').waitFor();
+  const bar = page.locator('.prp-comment-summary--compact .prp-comment-summary__bar');
+  await page.waitForFunction(() => {
+    const aside = document.querySelector('.prp-conversation__aside-host--collapsed');
+    return Math.abs(aside?.getBoundingClientRect().width - 96) <= 1;
+  });
+  const desktopGutters = await bar.evaluate(el => {
+    const panel = el.closest('.prp-conversation');
+    const splitter = panel.querySelector('.prp-conversation__splitter').getBoundingClientRect();
+    const chart = el.getBoundingClientRect();
+    return [chart.left - (splitter.left + splitter.width / 2), panel.getBoundingClientRect().right - chart.right];
+  });
+  assert(desktopGutters.every(gutter => Math.abs(gutter - 18) <= 1), `unbalanced compact chart: ${desktopGutters}`);
   await page.locator('.prp-conversation__aside').screenshot({ path: '/tmp/pr-plus-comments-sidebar-compact.png' });
+  await page.setViewportSize({ width: 800, height: 1000 });
+  const stacked = await bar.evaluate(el => {
+    const main = el.closest('.prp-conversation').querySelector('.prp-conversation__main').getBoundingClientRect();
+    const aside = el.closest('.prp-conversation__aside').getBoundingClientRect();
+    const chart = el.getBoundingClientRect();
+    return { belowMain: aside.top >= main.bottom - 1, width: aside.width, gutters: [chart.left - aside.left, aside.right - chart.right] };
+  });
+  assert(stacked.belowMain && Math.abs(stacked.width - 96) <= 1, `compact rail not stacked: ${JSON.stringify(stacked)}`);
+  assert(stacked.gutters.every(gutter => Math.abs(gutter - 8) <= 1), `unbalanced stacked chart: ${stacked.gutters}`);
   await fixture('empty');
   await page.locator('.prp-comment-summary--compact').getByText('No review conversations').waitFor();
   console.log('PASS: sidebar placement, resolve updates, partial coverage, compact rail, and empty state');

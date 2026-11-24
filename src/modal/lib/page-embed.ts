@@ -31,10 +31,8 @@ export const PAGE_EMBED_HOST_ID = 'prp-page-embed';
 export const PAGE_EMBED_ACTIVE_CLASS = 'prp-embed-active';
 
 /**
- * While embed covers the PR page, host installs a window-capture key shield
- * so GitHub SPA document-level shortcuts never see keydown/keyup/keypress.
- * pr+ handlers must listen on `window` (same phase) — stopPropagation does not
- * cancel other listeners on the same target.
+ * While embed covers the PR page, shield page-targeted keys in capture and
+ * isolate pr+ controls from document bubble handlers after local handling.
  */
 export const PAGE_EMBED_KEY_SHIELD_EVENTS: readonly string[] = [
   'keydown',

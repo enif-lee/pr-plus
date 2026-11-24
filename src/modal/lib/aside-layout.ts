@@ -5,12 +5,11 @@
 
 export const ASIDE_PREF_KEY = 'prp:aside-rail';
 export const ASIDE_EXPANDED_WIDTH = 280;
-/** Compact rail width (~80px for labels + small avatars / check stack) */
-export const ASIDE_COLLAPSED_WIDTH = 80;
+/** Compact rail width for labels, small avatars, and the check stack. */
+export const ASIDE_COLLAPSED_WIDTH = 96;
 /**
  * Vertical splitter track between main and aside (hosts collapse control).
- * Hairline sits on the left edge so main content is flush; the track width
- * is for the circular control, not empty gap on both sides.
+ * The hairline and circular control are centered in the track.
  */
 export const ASIDE_SPLITTER_WIDTH = 28;
 

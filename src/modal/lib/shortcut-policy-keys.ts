@@ -285,6 +285,13 @@ export function shouldIgnoreModalEscapeForGithubPalette(
   return false;
 }
 
+/** Native palette precedence for independently registered controls. */
+export function githubCommandPaletteOwnsKey(e: KeyboardEvent): boolean {
+  return e.key === 'Escape'
+    ? shouldIgnoreModalEscapeForGithubPalette(undefined, { target: e.target })
+    : touchGithubCommandPaletteOpen();
+}
+
 /** Test helper — reset sticky watch timestamp. */
 export function __resetGithubPaletteWatchForTests(): void {
   _githubPaletteLastOpenAt = 0;

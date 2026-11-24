@@ -1705,6 +1705,7 @@ function ConversationViewImpl(props: any) {
       return renderReviewThreadCard(item, keyPrefix);
     }
 
+    const bodylessReview = isReviewEvent && !String(item.body ?? '').trim();
     const itemAnchor = isIssue
       ? `issue-comment:${item.id}`
       : isReviewEvent
@@ -1780,6 +1781,7 @@ function ConversationViewImpl(props: any) {
                   minimizedReason: item.minimizedReason,
                   viewerCanMinimize: item.viewerCanMinimize,
                   focused,
+                  hideBodyActions: bodylessReview,
                 }
               )}
             </div>
@@ -1790,7 +1792,7 @@ function ConversationViewImpl(props: any) {
               </>
             ) : editKind ? (
               renderTimelineBody(item, editKind, itemAnchor, focused)
-            ) : (
+            ) : bodylessReview ? null : (
               renderSearchableBody(item.body || '', itemAnchor, true)
             )}
           </Card>

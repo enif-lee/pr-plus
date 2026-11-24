@@ -129,6 +129,7 @@ export function createCommentChrome(cv: any) {
       minimizedReason?: string | null;
       viewerCanMinimize?: boolean | null;
       focused?: boolean;
+      hideBodyActions?: boolean;
     } = {}
   ) {
     if (!kind && !id) return null;
@@ -145,18 +146,20 @@ export function createCommentChrome(cv: any) {
     const S = CONTEXT_COMMENT_ACTION_SHORTCUT;
     return (
       <div className="prp-icon-actions">
-        <CommentActionIconBtn
-          tipTitle={S.copyBody.title}
-          shortcut={S.copyBody.labelMac}
-          showShortcutHint={sc}
-          disabled={actionBusy}
-          aria-label="Copy comment text"
-          data-prp-copy-comment="1"
-          data-prp-comment-id={id != null ? String(id) : undefined}
-          onClick={(): any => void copyCommentBody(body, id)}
-        >
-          <IconCopy size={13} />
-        </CommentActionIconBtn>
+        {!meta.hideBodyActions ? (
+          <CommentActionIconBtn
+            tipTitle={S.copyBody.title}
+            shortcut={S.copyBody.labelMac}
+            showShortcutHint={sc}
+            disabled={actionBusy}
+            aria-label="Copy comment text"
+            data-prp-copy-comment="1"
+            data-prp-comment-id={id != null ? String(id) : undefined}
+            onClick={(): any => void copyCommentBody(body, id)}
+          >
+            <IconCopy size={13} />
+          </CommentActionIconBtn>
+        ) : null}
         {canLink ? (
           <CommentActionIconBtn
             tipTitle={S.copyLink.title}
@@ -171,7 +174,7 @@ export function createCommentChrome(cv: any) {
             <IconLink size={13} />
           </CommentActionIconBtn>
         ) : null}
-        {body != null && String(body).length >= 0 ? (
+        {!meta.hideBodyActions && body != null ? (
           <CommentActionIconBtn
             tipTitle={S.quote.title}
             shortcut={S.quote.labelMac}

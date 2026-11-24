@@ -11,13 +11,12 @@
     try {
       const pe = pageEmbedApi();
       const sc = pe?.EMBED_OPEN_SHORTCUT || pe?.EMBED_RESTORE_SHORTCUT;
-      if (!sc) return '⌘⇧E';
       const isMac =
         typeof navigator !== 'undefined' &&
         /Mac|iPhone|iPad/.test(navigator.platform || '');
-      return isMac ? sc.label || '⌘⇧E' : sc.labelWin || 'Ctrl+Shift+E';
+      return isMac ? sc?.label || '⌥⇧E' : sc?.labelWin || 'Alt+Shift+E';
     } catch {
-      return '⌘⇧E';
+      return '⌥⇧E';
     }
   }
 
@@ -153,8 +152,8 @@
   }
 
   /**
-   * Native GH PR page: ⌘⇧E / Ctrl+Shift+E opens pr+ (inverse of restore-native).
-   * Installed once; no-op when embed is already active (App handles restore).
+   * Native GH PR page: ⌥⇧E / Alt+Shift+E opens pr+ (inverse of restore-native).
+   * Installed once; active shells own their own shortcuts.
    */
   let nativePrShortcutBound = false;
   function ensureNativePrOpenShortcut() {
@@ -163,8 +162,11 @@
     document.addEventListener(
       'keydown',
       (e) => {
-        if (!hostEnabled) return;
-        if (current.open && isEmbedPresentation(current.presentation)) return;
+        // A held restore chord must not reopen the embed on the native page.
+        if (
+          !hostEnabled || current.open || e.repeat || e.defaultPrevented ||
+          e.isComposing || e.getModifierState?.('AltGraph')
+        ) return;
         if (isEditableKeyTarget(e.target)) return;
         const pe = pageEmbedApi();
         const resolve =
@@ -175,8 +177,10 @@
           typeof resolve === 'function'
             ? resolve({
                 mod: e.metaKey || e.ctrlKey,
+                alt: e.altKey,
                 shift: e.shiftKey,
                 key: e.key,
+                code: e.code,
                 presentation: 'modal',
                 onNativePrPage: Boolean(
                   parsePrPagePath(
@@ -186,7 +190,7 @@
                 editableTarget: false,
               })
             : null;
-        if (action !== 'openEmbedView') return;
+        if (action !== 'openEmbedView' || githubPaletteOpenNow()) return;
         e.preventDefault();
         e.stopPropagation();
         openEmbedFromNativePr();

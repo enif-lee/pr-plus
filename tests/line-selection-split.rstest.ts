@@ -1105,18 +1105,19 @@ describe('optArrow shell wiring (static)', () => {
     );
   });
 
-  test('usePrModalHotkeys has Diff ↑↓ fast path before GH palette touch', () => {
+  test('usePrModalHotkeys checks GitHub palette ownership before the Diff ↑↓ fast path', () => {
     const hk = fs.readFileSync(
       path.join(__dirname, '..', 'src/modal/hooks/usePrModalHotkeys.ts'),
       'utf8'
     );
     const onKey = hk.indexOf('const onKey = (e');
     expect(onKey).toBeGreaterThan(0);
-    const body = hk.slice(onKey, onKey + 6000);
+    const body = hk.slice(onKey, hk.indexOf('// Diff selection shortcuts', onKey));
     const fast = body.indexOf('Diff ↑/↓ / Shift+↑↓ hot path');
     const ghInOnKey = body.indexOf('touchGithubCommandPaletteOpen');
     expect(fast).toBeGreaterThan(0);
-    expect(ghInOnKey).toBeGreaterThan(fast);
+    expect(ghInOnKey).toBeGreaterThan(0);
+    expect(fast).toBeGreaterThan(ghInOnKey);
     expect(body).toMatch(/applySelectionKeyboardMove/);
     expect(body).toMatch(/navFile/);
     expect(body).toMatch(/optArrowScrollSelect/);

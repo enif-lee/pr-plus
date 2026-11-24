@@ -1,3 +1,4 @@
+import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   filterPaletteCommands,
@@ -155,6 +156,7 @@ export function CommandPalette({
   onHelpOpenChange,
   detail = null,
   layoutMode = 'centered',
+  isEmbed = false,
   owner = '',
   repo = '',
 }: any) {
@@ -315,10 +317,11 @@ export function CommandPalette({
             ? 'diff'
             : 'centered',
         locale,
+        isEmbed,
       });
     }
     return [];
-  }, [helpEntriesProp, detail, layoutMode, open]);
+  }, [helpEntriesProp, detail, layoutMode, isEmbed, open]);
 
   const filtered = useMemo(() => {
     if (prSearch.isPrSearch) {
@@ -478,7 +481,8 @@ export function CommandPalette({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const alt = Boolean(e.altKey);
+      if (e.nativeEvent.isComposing || githubCommandPaletteOwnsKey(e.nativeEvent)) return;
+      const alt = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
       const code = String(e.code || '');
       const key = String(e.key || '').toLowerCase();
 

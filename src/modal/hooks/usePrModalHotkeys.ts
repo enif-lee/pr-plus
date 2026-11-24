@@ -418,15 +418,97 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       const act = actionsRef.current || {};
       const doc = typeof document !== 'undefined' ? document : null;
 
+      if (e.defaultPrevented || e.isComposing || e.getModifierState?.('AltGraph')) return;
+
+      // Keep sticky "was open" timestamp current while typing in GH palette.
+      let ghOpenNow = false;
+      try {
+        ghOpenNow =
+          typeof touchGithubCommandPaletteOpen === 'function'
+            ? touchGithubCommandPaletteOpen(doc)
+            : Boolean(
+                (globalThis as any).PRListFocus?.touchGithubCommandPaletteOpen?.(doc) ||
+                  (globalThis as any).PRListFocus?.isGithubCommandPaletteOpen?.(doc) ||
+                  (typeof isGithubCommandPaletteOpen === 'function' &&
+                    isGithubCommandPaletteOpen(doc))
+              );
+      } catch {
+        try {
+          ghOpenNow =
+            typeof isGithubCommandPaletteOpen === 'function' &&
+            isGithubCommandPaletteOpen(doc);
+        } catch {
+          ghOpenNow = false;
+        }
+      }
+
+      // While GH palette is open: never steal chords (let GH handle).
+      // On Escape after GH already closed the dialog on this same keydown:
+      // short grace suppresses pr+ shell close only — then shortcuts resume.
+      if (ghOpenNow) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        const ignoreEsc =
+          typeof shouldIgnoreModalEscapeForGithubPalette === 'function'
+            ? shouldIgnoreModalEscapeForGithubPalette(doc, { target: e.target })
+            : Boolean(
+                (globalThis as any).PRListFocus?.shouldIgnoreModalEscapeForGithubPalette?.(
+                  doc,
+                  { target: e.target }
+                )
+              );
+        if (ignoreEsc) {
+          // GH may leave <dialog> stuck in the CSS top layer after close
+          try {
+            (globalThis as any).PRListFocus?.recoverGithubCommandPaletteTopLayer?.(doc);
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+      }
+
+      // These layers own keyboard input even when focus has not reached the
+      // layer yet. Yield before the Diff fast path and footer composer.
+      if (
+        isFullscreenViewerOpen(doc) ||
+        ui.confirmOpen ||
+        ui.pickerOpen ||
+        doc?.querySelector(
+          '[data-prp-finish-review="1"], .prp-sselect-panel, [data-prp-review-filter-menu="1"], [data-prp-header-overflow="1"]'
+        )
+      ) return;
+
+      if (ui.paletteOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          act.dismissPaletteLayer?.();
+        }
+        return;
+      }
+
+      // Inputs with their own keyboard navigation must see the original event.
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest?.('[data-prp-diff-goto="1"]') &&
+        ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)
+      ) return;
+      if (
+        target?.matches?.('.prp-search__input') &&
+        alt && !mod && !e.shiftKey &&
+        (e.code === 'KeyJ' || e.code === 'KeyK' || /^[jk]$/i.test(e.key))
+      ) return;
+
       /**
        * Diff ↑/↓ / Shift+↑↓ hot path — key-hold fires 30–60×/s.
-       * Skip GH palette touch, full shortcut resolve, and chord machinery.
+       * Skip full shortcut resolve and chord machinery after layer checks.
        * (1.9.6 thrift: selection flush already rAF-coalesces.)
        */
-      const liveLayout =
-        ui.layoutMode === LAYOUT_DIFF ||
-        useModalStore.getState().layoutMode === LAYOUT_DIFF;
-      if (liveLayout && !mod) {
+      const liveLayout = useModalStore.getState().layoutMode || ui.layoutMode;
+      if (liveLayout === LAYOUT_DIFF && !mod) {
         const ae =
           typeof document !== 'undefined' ? document.activeElement : null;
         const typing =
@@ -532,65 +614,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
               })
             : String(e.key || '').toLowerCase();
 
-      // Keep sticky "was open" timestamp current while typing in GH palette.
-      // Skip on bare Diff arrows (handled above) — DOM queries on every hold tick.
-      let ghOpenNow = false;
-      try {
-        ghOpenNow =
-          typeof touchGithubCommandPaletteOpen === 'function'
-            ? touchGithubCommandPaletteOpen(doc)
-            : Boolean(
-                (globalThis as any).PRListFocus?.touchGithubCommandPaletteOpen?.(doc) ||
-                  (globalThis as any).PRListFocus?.isGithubCommandPaletteOpen?.(doc) ||
-                  (typeof isGithubCommandPaletteOpen === 'function' &&
-                    isGithubCommandPaletteOpen(doc))
-              );
-      } catch {
-        try {
-          ghOpenNow =
-            typeof isGithubCommandPaletteOpen === 'function' &&
-            isGithubCommandPaletteOpen(doc);
-        } catch {
-          ghOpenNow = false;
-        }
-      }
-
-      // While GH palette is open: never steal chords (let GH handle).
-      // On Escape after GH already closed the dialog on this same keydown:
-      // short grace suppresses pr+ shell close only — then shortcuts resume.
-      if (ghOpenNow) {
-        return;
-      }
-
-      // Fullscreen viewer (mermaid / image / markdown) owns the stage: Opt
-      // chords belong to its pan/zoom handlers (registered later, still run
-      // when we return here). Never fire modal Opt actions — or let the hint
-      // HUD report them — over the preview.
-      if (alt && !mod && isFullscreenViewerOpen()) {
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        const ignoreEsc =
-          typeof shouldIgnoreModalEscapeForGithubPalette === 'function'
-            ? shouldIgnoreModalEscapeForGithubPalette(doc, { target: e.target })
-            : Boolean(
-                (globalThis as any).PRListFocus?.shouldIgnoreModalEscapeForGithubPalette?.(
-                  doc,
-                  { target: e.target }
-                )
-              );
-        if (ignoreEsc) {
-          // GH may leave <dialog> stuck in the CSS top layer after close
-          try {
-            (globalThis as any).PRListFocus?.recoverGithubCommandPaletteTopLayer?.(doc);
-          } catch {
-            /* ignore */
-          }
-          return;
-        }
-      }
-
       // Diff selection shortcuts (only when not typing in an editable field).
       // `key` is already code-normalized (⌥C → "c" even when e.key is "ç").
       const ae = typeof document !== 'undefined' ? document.activeElement : null;
@@ -621,14 +644,14 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         key === 'c'
       ) {
         // ⌥C → Comment · ⌘C → Copy code · ⌘⌥C → Copy URL
-        if (mod && alt) {
+        if (mod && alt && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           reportShortcutAction('copySelectionUrl');
           void act.copySelectionUrl?.();
           return;
         }
-        if (mod && !alt) {
+        if (mod && !alt && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           reportShortcutAction('copySelectionCode');
@@ -642,18 +665,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           act.openSelectionComment?.();
           return;
         }
-      }
-
-      // Finish-review form owns Esc layering + Opt chords (⌥I focus input,
-      // leave-review submit) while open. Do not pre-blur, close shell, or
-      // steal ⌥I into Diff/Conversation composers.
-      const finishReviewOpen = Boolean(
-        typeof document !== 'undefined' &&
-          document.querySelector('[data-prp-finish-review="1"]')
-      );
-      if (finishReviewOpen) {
-        if (e.key === 'Escape') return;
-        if (e.altKey && !e.metaKey && !e.ctrlKey) return;
       }
 
       // Escape: dismiss nested UI first, otherwise close the whole modal
@@ -721,13 +732,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         // Pure owner says nested: never close shell (finish-review / confirm /
         // pickers / Diff settings / SearchableSelect / viewers / title edit).
         if (owner === 'dismiss-nested' || nestedOpen) {
-          // Confirm / finish already own Esc; store pickers/palette/search need
-          // explicit dismiss here when App is the only handler for store state.
-          if (ui.confirmOpen) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
           if (viewerOpen) {
             // Viewer components close themselves
             return;
@@ -742,18 +746,6 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           }
           if (titleEditFocused) {
             // Header title Esc cancels edit
-            return;
-          }
-          if (ui.pickerOpen) {
-            e.preventDefault();
-            e.stopPropagation();
-            act.closePicker?.();
-            return;
-          }
-          if (ui.paletteOpen) {
-            e.preventDefault();
-            e.stopPropagation();
-            setPaletteOpen(false);
             return;
           }
           if (ui.searchOpen || useModalStore.getState().searchOpen) {
@@ -783,48 +775,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
             editorSaveRef.current = null;
             return;
           }
-          // Diff settings / SearchableSelect / header overflow: window-capture
-          // runs before their document listeners — actively dismiss here so Esc
-          // is not a no-op when CDP/synthetic keys skip document capture order.
           e.preventDefault();
           e.stopPropagation();
-          try {
-            const gear = document.querySelector(
-              '[data-prp-review-filter-gear="1"][aria-expanded="true"]'
-            ) as HTMLElement | null;
-            if (gear) {
-              gear.click();
-            } else if (
-              document.querySelector(
-                '[data-prp-review-filter-menu="1"], .prp-diff-review-settings--portal'
-              )
-            ) {
-              // Menu open without expanded attr — toggle gear or remove marker
-              const g = document.querySelector(
-                '[data-prp-review-filter-gear="1"]'
-              ) as HTMLElement | null;
-              g?.click?.();
-            }
-          } catch {
-            /* ignore */
-          }
-          try {
-            // SearchableSelect: close open panels via Escape on trigger/panel
-            const panel = document.querySelector(
-              '.prp-sselect-panel, [data-prp-nested-layer="1"]'
-            ) as HTMLElement | null;
-            if (panel) {
-              panel.dispatchEvent(
-                new KeyboardEvent('keydown', {
-                  key: 'Escape',
-                  bubbles: true,
-                  cancelable: true,
-                })
-              );
-            }
-          } catch {
-            /* ignore */
-          }
           // Also blur if an editable still holds focus under a nested layer
           if (editableFocused) {
             try {
@@ -883,6 +835,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       // `alt` already from e.altKey above (physical-key normalize).
       const ctrlKey = Boolean(e.ctrlKey);
       const altOnly = alt && !e.metaKey && !ctrlKey;
+      // Ctrl is the Mod modifier except when paired with Option for resolve.
+      const shortcutMod = Boolean(e.metaKey) || (ctrlKey && !alt);
       const shift = Boolean(e.shiftKey);
       // Capabilities for composer-context chords (DOM on focused / default form)
       let canResolveComposer = false;
@@ -923,9 +877,9 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
         typeof resolveComposerContextShortcutAction === 'function'
       ) {
         const composerAct = resolveComposerContextShortcutAction({
-          mod: composerFocused ? mod : mod && !alt,
+          mod: shortcutMod,
           shift,
-          alt: alt && !e.metaKey,
+          alt,
           ctrl: ctrlKey,
           key,
           code: e.code,
@@ -1114,6 +1068,7 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           e.stopPropagation();
           return;
         }
+        if (isEmbed && peer?.action === 'toggleFullscreen') return;
         if (peer?.action && !skipPeerForDiffViewed) {
           e.preventDefault();
           e.stopPropagation();
@@ -1129,8 +1084,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           } catch {
             /* ignore */
           }
-          // Leave the typing surface so pickers can take focus
-          if (editable) {
+          // Pickers transfer focus themselves, preserving the invoker for Escape.
+          if (editable && !peer.action.startsWith('prompt')) {
             try {
               (document.activeElement as HTMLElement | null)?.blur?.();
             } catch {
@@ -1272,11 +1227,9 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
       let action =
         typeof resolveModalShortcutAction === 'function'
           ? resolveModalShortcutAction({
-              // When Option is held, do not treat Ctrl/⌘ as "mod" — Ctrl pairs with ⌥ for resolve.
-              // For ⌘Enter submit while composer-focused, keep real mod.
-              mod: composerFocused ? mod : mod && !alt,
+              mod: shortcutMod,
               shift,
-              alt: alt && !e.metaKey,
+              alt,
               /** Physical Control (⌥⌃R resolve) — not ⌘/meta */
               ctrl: ctrlKey,
               key,
@@ -1320,6 +1273,8 @@ export function usePrModalHotkeys(h: Record<string, any>): void {
           editableTarget: editable,
         });
       }
+
+      if (isEmbed && action === 'toggleFullscreen') return;
 
       if (!action) {
         // Keep held ↑/↓ from native-scrolling the conversation away after a

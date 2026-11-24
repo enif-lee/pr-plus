@@ -146,7 +146,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Compact meta rail** | Collapsed right rail: reviewers / assignees / checks / labels as avatar stacks and status chips; hover tips open over the conversation (not clipped by the splitter) |
 | **Side panel toggle** | `⌥B` collapses / expands the Conversation meta rail (same chord collapses the Diff file tree) |
 | **Profile avatars** | GitHub profile images for authors and pickers |
-| **Context chords on focused thread** | With a focused timeline unit: `⌥F` fold/expand, `⌥D` open Diff at the thread (~⅓ viewport), `⌥C` focus reply composer |
+| **Context chords on focused thread** | With a focused timeline unit: `⌥F` fold/expand, `⌥D` open Diff at the thread (~⅓ viewport), `⌥I` focus reply composer |
 | **Conversation scroll chords** | `⌥↑` / `⌥↓` nudge the timeline; `⌥⇧↑` / `⌥⇧↓` page-scroll ~one viewport |
 
 #### Diff & code review
@@ -204,7 +204,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | **Diff review filters** | `⌥U` / `⌥R` / `⌥P` — Unresolved / Resolved / Pending (toggle off with the same key) |
 | **Diff navigation** | File `⌥⇧[` `⌥⇧]`, page `⌥⇧↑` `⌥⇧↓`, viewed `⌥⇧R`, Goto via floating **:** control |
 | **Conversation navigation** | Thread `⌥J` `⌥K`, seed/clear focus `⌥⇧C`, panel `⌥↑` `⌥↓`, page `⌥⇧↑` `⌥⇧↓` |
-| **Context on focused unit** | `⌥F` fold · `⌥D` goto Diff · `⌥C` reply (active panel only) |
+| **Context on focused unit** | `⌥F` fold · `⌥D` goto Diff · `⌥I` reply (active panel only) |
 | **Button shortcuts** | Primary actions show kbd hints; Opt-hold badges hide right after a chord fires |
 | **Multi-host PAT** | Default token for **github.com** only; up to **3 enterprise host↔PAT** pairs (no accidental enterprise use of the default PAT) |
 | **Popup options** | Auto-open embed, fast review load, reverse comments, **single-file Diff mode** |
@@ -217,7 +217,7 @@ Open a PR title from the list → **centered modal** or **side sheet** on the **
 | `⌥.` | Toggle Conversation ↔ Diff |
 | `⌥J` / `⌥K` | Next / previous thread (or Find hit when Find is open) |
 | `⌥⇧C` | Seed / clear Conversation keyboard focus |
-| `⌥F` / `⌥D` / `⌥C` | Fold / goto Diff / reply on the **focused** unit |
+| `⌥F` / `⌥D` / `⌥I` | Fold / goto Diff / reply on the **focused** unit |
 | `⌥↑` / `⌥↓` | Conversation: panel scroll · Diff: multi-line selection jump (~8 rows) |
 | `⌥⇧↑` / `⌥⇧↓` | Page scroll (~0.9 viewport) on the active list |
 | `⌥⇧[` / `⌥⇧]` | Previous / next file (from current file; **hold coalesces**) |

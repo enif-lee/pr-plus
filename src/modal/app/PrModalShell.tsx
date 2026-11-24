@@ -1450,6 +1450,7 @@ export function PrModalApp({
     applyDomainDetailToHost,
     detailProp,
     initialRoute,
+    onRouteChange,
     open,
     onClose,
     onRefresh,
@@ -3369,9 +3370,10 @@ export function PrModalApp({
       canSubmitReviewVerdict: canVerdict,
       // Diff-only commands (file nav, selection, filters, viewed…)
       layoutMode: layoutMode === LAYOUT_DIFF ? 'diff' : 'centered',
+      isEmbed,
       locale: appLocale,
     });
-  }, [detail, stackItems, openPulls, layoutMode, appLocale]);
+  }, [detail, stackItems, openPulls, layoutMode, isEmbed, appLocale]);
 
   /** Async PR search boundary for palette `#…` mode (injectable fetch). */
   const searchPalettePrs = useCallback(
@@ -4050,6 +4052,10 @@ export function PrModalApp({
   };
   actionsRef.current = {
     onClose: requestClose,
+    dismissPaletteLayer: () => {
+      if (paletteHelpOpen) setPaletteHelpOpen(false);
+      else setPaletteOpen(false);
+    },
     onToggleDiff,
     collapseDiff,
     closePicker,
@@ -4906,6 +4912,7 @@ export function PrModalApp({
           helpOpen={paletteHelpOpen}
           onHelpOpenChange={setPaletteHelpOpen}
           detail={detail}
+          isEmbed={isEmbed}
           layoutMode={layoutMode === LAYOUT_DIFF ? 'diff' : 'centered'}
           owner={detail?.owner || ''}
           repo={detail?.repo || ''}

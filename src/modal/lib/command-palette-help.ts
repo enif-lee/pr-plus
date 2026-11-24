@@ -42,6 +42,7 @@ export function buildModalPaletteHelpEntries(
     openPulls?: any[];
     canSubmitReviewVerdict?: boolean;
     locale?: string;
+    isEmbed?: boolean;
   } = {}
 ): Array<{
   id: string;

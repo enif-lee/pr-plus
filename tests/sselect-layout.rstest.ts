@@ -78,7 +78,7 @@ describe('SearchableSelect never paints anchored panel in-flow', () => {
     expect(ui).toMatch(/layoutSselectPopover/);
     expect(ui).toMatch(/data-prp-sselect-placed/);
     expect(ui).toMatch(/visibility:\s*'hidden'/);
-    expect(ui).toMatch(/!anchored && !placed/);
+    expect(ui).toMatch(/if \(open && placed\)[\s\S]*?inputRef\.current\?\.focus/);
     expect(ui).not.toMatch(
       /className=\{`prp-sselect-panel prp-sselect-panel--popover\$\{pos \? '' : ' prp-sselect-panel--center'\}/
     );

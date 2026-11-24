@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@common/Button';
 import { StepNav } from '@common/StepNav';
-import { stepNavShortcutLabel } from '@lib/shortcut-policy';
+import { shortcutKeyFromEvent, stepNavShortcutLabel } from '@lib/shortcut-policy';
 import './SearchAndFileNav.css';
 
 /** Default pause after last keystroke before parent/search runs. */
@@ -124,6 +124,7 @@ export const SearchBar = memo(function SearchBar({
           scheduleCommit(v);
         }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
           // ⌘F / Ctrl+F while already in the finder: select all + block browser find
           const isFindChord =
             (e.key === 'f' || e.key === 'F' || e.code === 'KeyF') &&
@@ -144,17 +145,17 @@ export const SearchBar = memo(function SearchBar({
             }
             return;
           }
-          if (e.key === 'Enter' && e.shiftKey) {
+          const key = shortcutKeyFromEvent(e.nativeEvent);
+          const plainEnter = e.key === 'Enter' && !e.altKey && !e.metaKey && !e.ctrlKey;
+          const optStep = e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey
+            && (key === 'j' || key === 'k');
+          if (plainEnter || optStep) {
             e.preventDefault();
+            e.stopPropagation();
             if (pendingCommit) {
               commit(draft);
-            } else {
+            } else if (e.shiftKey || key === 'k') {
               onPrev?.();
-            }
-          } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (pendingCommit) {
-              commit(draft);
             } else {
               onNext?.();
             }

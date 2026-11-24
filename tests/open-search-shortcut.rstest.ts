@@ -44,6 +44,7 @@ describe('openSearch (mod+f) claims over editable targets', () => {
     expect(
       resolveModalShortcutAction({
         mod: true,
+        ctrl: true,
         alt: false,
         shift: false,
         key: 'f',

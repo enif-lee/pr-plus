@@ -327,7 +327,7 @@ export function resolveModalShortcutAction(opts: any = {}) {
    * ⌥I/D seed the first thread — that force must not steal file fold.)
    */
   if (contextThreadActive && alt && !shift) {
-    if (ctrl && !mod && key === 'r') {
+    if (ctrl && !mod && key === 'r' && !opts.editableTarget) {
       return CONTEXT_THREAD_SHORTCUT.resolve.action;
     }
     if (!ctrl && !mod) {
@@ -584,6 +584,7 @@ export function resolveModalShortcutAction(opts: any = {}) {
       composerFocused: true,
       canResolve: opts.canResolve,
       canToggleMode: opts.canToggleMode,
+      canStartPending: opts.canStartPending,
     });
     if (ca) return ca;
   }
@@ -591,7 +592,10 @@ export function resolveModalShortcutAction(opts: any = {}) {
   // ⌘F / Ctrl+F → Find in PR — even while focused in an input (incl. our
   // search bar after navigate). Always claim so the browser find UI does not
   // open; openSearch re-focuses the finder and selects existing text.
-  if (mod && !alt && !shift && !ctrl && key === 'f') return 'openSearch';
+  if (mod && !alt && !shift && key === 'f') return 'openSearch';
+
+  // Like the /pulls palette, this explicit chord also opens from a text field.
+  if (alt && shift && !mod && !ctrl && key === 'k') return 'openPalette';
 
   // Do not steal other keys while typing in inputs/textareas/contenteditable
   if (opts.editableTarget) return null;
@@ -599,9 +603,6 @@ export function resolveModalShortcutAction(opts: any = {}) {
   // Remaining product shortcuts are Option-only (Ctrl only used with ⌥ for resolve)
   if (!alt || mod) return null;
   if (ctrl) return null;
-
-  // ⌥⇧K → pr+ command palette (same as pulls page)
-  if (shift && key === 'k') return 'openPalette';
 
   // ⌥⇧F → fullscreen shell toggle
   if (shift && key === 'f') return 'toggleFullscreen';

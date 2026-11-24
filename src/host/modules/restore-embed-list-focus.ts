@@ -412,7 +412,7 @@
   }
 
   function isPullsListPage() {
-    return /\/[^/]+\/[^/]+\/pulls/.test(location.pathname || '');
+    return /^\/[^/]+\/[^/]+\/pulls(?:\/|$)/.test(location.pathname || '');
   }
 
   /**

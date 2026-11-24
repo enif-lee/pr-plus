@@ -40,6 +40,7 @@ export function StackStrip({
   }, [branches]);
 
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [pickerActivation, setPickerActivation] = useState(0);
   const [armedKey, setArmedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   /** Live anchor element in state so SearchableSelect remeasures reliably. */
@@ -273,6 +274,8 @@ export function StackStrip({
                 onContextMenu={(e) => {
                   if (!hasPicker) return;
                   e.preventDefault();
+                  // Explicitly re-enter the search even if hover already opened it.
+                  setPickerActivation((value) => value + 1);
                   openPickerAt(chipKey);
                 }}
               >
@@ -319,7 +322,7 @@ export function StackStrip({
         emptyLabel="No alternate path"
         allowFreeText={false}
         anchorRef={openAnchorRef}
-        anchorKey={`${openKey || ''}:${anchorEl ? '1' : '0'}:${selectOptions.length}`}
+        anchorKey={`${openKey || ''}:${anchorEl ? '1' : '0'}:${selectOptions.length}:${pickerActivation}`}
         placement="bottom"
       />
     </div>

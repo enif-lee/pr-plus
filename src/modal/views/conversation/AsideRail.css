@@ -112,6 +112,10 @@
   font-size: 13px;
 }
 
+.prp-card--timeline-review .prp-conversation-feed__meta:only-child {
+  margin-bottom: 0;
+}
+
 /* Top-level timeline cards (comment / review / thread / reply) */
 .prp-card--timeline .prp-card__body {
   display: flex;
@@ -135,9 +139,10 @@
  * Columns scroll independently so the right rail stays sticky in view. */
 .prp-conversation {
   --prp-aside-w: 280px;
+  --prp-aside-splitter-w: 28px;
   display: grid;
   /* main | splitter (28px for collapse ctrl) | aside — aside width via --prp-aside-w */
-  grid-template-columns: minmax(0, 1fr) 28px var(--prp-aside-w);
+  grid-template-columns: minmax(0, 1fr) var(--prp-aside-splitter-w) var(--prp-aside-w);
   gap: 0;
   overflow: hidden;
   flex: 1 1 auto;
@@ -150,13 +155,13 @@
   transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-
-.prp-conversation--aside-collapsed {
-  /* --prp-aside-w set inline to compact width (ASIDE_COLLAPSED_WIDTH) */
-  /* Ensure grid track actually shrinks even if content min-size fights */
-  grid-template-columns: minmax(0, 1fr) 28px var(--prp-aside-w, 80px);
+@media (max-width: 840px) {
+  .prp-conversation {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+    padding-right: 18px; /* no aside column — restore outer right pad */
+  }
 }
-
 
 .prp-aside-overflow {
   margin-top: 8px;

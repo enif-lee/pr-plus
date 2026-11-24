@@ -1636,7 +1636,7 @@ export function getSteps() {
       mid.ariaExpanded === 'false' || mid.ariaExpanded === null,
       `collapse control aria-expanded should be false: ${JSON.stringify(mid)}`
     );
-    // Compact rail is narrower (product ASIDE_COLLAPSED_WIDTH ~80).
+    // Compact rail is narrower than the expanded metadata panel.
     // Prefer measured host width; fall back to --prp-aside-w CSS var (grid track).
     if (expandedW > 120) {
       const shrunkHost = mid.w > 0 && mid.w < expandedW - 40;

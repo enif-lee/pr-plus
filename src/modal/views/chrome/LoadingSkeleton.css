@@ -402,21 +402,11 @@
 
 
 @media (max-width: 840px) {
-  .prp-conversation {
-    grid-template-columns: 1fr;
-    overflow: auto;
-    padding-right: 18px; /* no aside column — restore outer right pad */
-  }
-
   .prp-conversation__main,
   .prp-conversation__aside {
     overflow: visible;
     max-height: none;
   }
-  .prp-conversation__aside {
-    padding-right: 0; /* already on container */
-  }
-
   .prp-skeleton__grid,
   .prp-skeleton-conversation {
     grid-template-columns: 1fr;

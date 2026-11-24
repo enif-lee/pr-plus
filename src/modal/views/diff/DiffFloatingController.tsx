@@ -1,3 +1,4 @@
+import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconChevronDown,
@@ -160,6 +161,24 @@ export function DiffFloatingController(props: {
           aria-expanded="true"
           aria-haspopup="listbox"
           data-prp-diff-goto="1"
+          onBlur={(e) => {
+            if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) closeGoto();
+          }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || githubCommandPaletteOwnsKey(e.nativeEvent)) return;
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              closeGoto();
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!suggestions.length) return;
+              const delta = e.key === 'ArrowDown' ? 1 : -1;
+              setActiveIndex(i => (i + delta + suggestions.length) % suggestions.length);
+              inputRef.current?.focus({ preventScroll: true });
+            }
+          }}
         >
           {suggestions.length > 0 ? (
             <ul
@@ -244,19 +263,8 @@ export function DiffFloatingController(props: {
             disabled={disabled}
             data-prp-diff-goto-input="1"
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!suggestions.length) return;
-                setActiveIndex((i) => (i + 1) % suggestions.length);
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!suggestions.length) return;
-                setActiveIndex(
-                  (i) => (i - 1 + suggestions.length) % suggestions.length
-                );
-              } else if (e.key === 'Enter') {
+              if (e.nativeEvent.isComposing || githubCommandPaletteOwnsKey(e.nativeEvent)) return;
+              if (e.key === 'Enter') {
                 e.preventDefault();
                 e.stopPropagation();
                 const typed = String(gotoQuery || '').trim();
@@ -268,10 +276,6 @@ export function DiffFloatingController(props: {
                 } else {
                   submitGoto();
                 }
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                closeGoto();
               }
             }}
           />

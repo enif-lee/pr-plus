@@ -1565,6 +1565,13 @@ export function usePrModalSessionRoute(b: any) {
       fileKey || sel.filePath || ''
     }:${sel.startLine ?? ''}:${sel.endLine ?? ''}`;
 
+    // Let the host update its route snapshot and URL together. Writing first
+    // here can leave the embed watcher treating our own URL as external navigation.
+    if (typeof onRouteChange === 'function') {
+      onRouteChange(routePayload);
+      return;
+    }
+
     // Fixture / non-extension: write location directly (no chrome.*)
     try {
       if (typeof history !== 'undefined' && typeof location !== 'undefined') {
@@ -1595,10 +1602,6 @@ export function usePrModalSessionRoute(b: any) {
     } catch {
       /* ignore */
     }
-
-    if (typeof onRouteChange === 'function') {
-      onRouteChange(routePayload);
-    }
   }, [
     open,
     detail?.number,
@@ -1618,10 +1621,14 @@ export function usePrModalSessionRoute(b: any) {
     if (!open || !routeWriteReady || !detail?.number) return undefined;
     let timer = 0;
     const unsub = useModalStore.subscribe((state, prev) => {
+      if (state.layoutMode !== LAYOUT_DIFF) {
+        if (prev.layoutMode === LAYOUT_DIFF) window.clearTimeout(timer);
+        return;
+      }
       if (state.lineSelection === prev.lineSelection) return;
-      if (state.layoutMode !== LAYOUT_DIFF) return;
       window.clearTimeout(timer);
       const flushRoute = () => {
+        if (useModalStore.getState().layoutMode !== LAYOUT_DIFF) return;
         // Long frames can create >280ms gaps inside a held burst. Do not turn
         // those gaps into history/style work; wait for the shared idle stamp.
         if (

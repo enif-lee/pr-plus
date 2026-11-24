@@ -284,23 +284,29 @@
 
   /**
    * Isolate keyboard from the buried GH PR SPA while embed is open.
-   * Window capture + stopPropagation: document/body GH listeners never see the
-   * event. Other window-capture listeners (pr+ hotkeys) still run.
+   * Stop page-targeted keys in capture. For pr+ controls, let React receive
+   * the key first, then stop it from bubbling to GitHub's document delegates.
    */
   let embedKeyShieldBound = false;
+  let embedKeyShieldBody: HTMLElement | null = null;
   function onEmbedKeyShield(e: any) {
     try {
       if (!current.open || !isEmbedPresentation(current.presentation)) return;
-      // Only shield when embed host is actually mounted
-      if (!document.getElementById(embedHostId())) return;
+      const host = document.getElementById(embedHostId());
+      if (!host) return;
+      if (e.currentTarget === window) {
+        if (host.contains(e.target) || e.target?.closest?.('.prp-portal')) return;
+      }
+      // Do not re-check containment in bubble: a React handler can close a
+      // palette and remove the key target before the event gets to body.
       e.stopPropagation();
     } catch {
       /* ignore */
     }
   }
   function ensureEmbedKeyShield() {
-    if (embedKeyShieldBound) return;
-    embedKeyShieldBound = true;
+    const body = document.body;
+    if (embedKeyShieldBound && body === embedKeyShieldBody) return;
     const pe = pageEmbedApi();
     const events =
       (Array.isArray(pe?.PAGE_EMBED_KEY_SHIELD_EVENTS) &&
@@ -308,11 +314,16 @@
       ['keydown', 'keyup', 'keypress'];
     for (const type of events) {
       try {
-        window.addEventListener(type, onEmbedKeyShield, true);
+        if (!embedKeyShieldBound) window.addEventListener(type, onEmbedKeyShield, true);
+        embedKeyShieldBody?.removeEventListener(type, onEmbedKeyShield);
+        // Body portals receive delegated React handlers on this same node.
+        body?.addEventListener(type, onEmbedKeyShield);
       } catch {
         /* ignore */
       }
     }
+    embedKeyShieldBound = true;
+    embedKeyShieldBody = body;
   }
 
   /** Keep pr+ events out of GitHub's document-level React/event delegates. */
@@ -533,7 +544,7 @@
     if (main) hideNativeMainChildren(main, host);
     // Body-level residual + header/flash chrome (stronger than main-only hide)
     suppressGithubResidual(host);
-    // Block GH SPA shortcuts under the fixed cover (pr+ uses window listeners)
+    // Keep keyboard input on the active surface under the fixed cover
     ensureEmbedKeyShield();
     document.documentElement.classList.add(embedActiveClass());
     try {

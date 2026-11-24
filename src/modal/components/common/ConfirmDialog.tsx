@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
 import { Button } from './Button';
 
 export type ConfirmDialogTone = 'danger' | 'warn' | 'default';
@@ -48,7 +49,7 @@ export function ConfirmDialog({
       }
     }, 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented && !e.isComposing && !githubCommandPaletteOwnsKey(e)) {
         e.preventDefault();
         e.stopPropagation();
         // Same-target window listeners (modal Escape) must not run after us

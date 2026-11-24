@@ -12,6 +12,7 @@ import { Avatar } from './Avatar';
 import { IconCheck } from './icons';
 import { ShortcutHint } from './ShortcutHint';
 import { useT } from '@lib/locale-context';
+import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
 import './SearchableSelect.css';
 
 /**
@@ -80,8 +81,17 @@ export function SearchableSelect({
   const footerVisible =
     showFooter == null ? Boolean(multi) : Boolean(showFooter);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const returnFocusRef = useRef<{ target: HTMLElement; composer: HTMLElement | null } | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const placed = Boolean(pos);
   const [selected, setSelected] = useState<string[]>([]);
+
+  // Keep the portal host in the layout/focus dependencies: moving the portal
+  // remounts the input even if the picker is already open and placed.
+  const portalRoot = !open || typeof document === 'undefined'
+    ? null
+    : document.querySelector('.prp-overlay') || document.body;
 
   // Reset multi selection when opening
   useEffect(() => {
@@ -98,30 +108,39 @@ export function SearchableSelect({
 
   useLayoutEffect(() => {
     if (!open) {
+      returnFocusRef.current = null;
+      return;
+    }
+    const active = document.activeElement as HTMLElement | null;
+    if (active && !panelRef.current?.contains(active)) {
+      returnFocusRef.current = {
+        target: active,
+        composer: active.matches('[data-prp-composer-input]')
+          ? active.closest('[data-prp-composer]')
+          : null,
+      };
+    }
+  }, [open, anchorKey]);
+
+  useLayoutEffect(() => {
+    if (!open) {
       setPos(null);
       return undefined;
     }
-
+    if (!portalRoot) return undefined;
     function measure() {
-      const el = (anchorRef?.current || null) as HTMLElement | null;
-      if (!el || typeof el.getBoundingClientRect !== 'function') return;
-      const r = el.getBoundingClientRect();
-      if (!r.width && !r.height) return;
-      const next = layoutSselectPopover({
-        anchor: {
-          top: r.top,
-          left: r.left,
-          right: r.right,
-          bottom: r.bottom,
-          width: r.width,
-          height: r.height,
-        },
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        panelHeight: panelRef.current?.offsetHeight || 0,
-        minWidth,
-        maxWidth,
-        placement,
-      });
+      const r = (anchorRef?.current as HTMLElement | null)?.getBoundingClientRect();
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const panelHeight = panelRef.current?.offsetHeight || 0;
+      const width = Math.min(minWidth, Math.max(0, viewport.width - 16));
+      // Keyboard/palette actions can open a picker without a visible trigger.
+      const next = r && (r.width || r.height)
+        ? layoutSselectPopover({ anchor: r, viewport, panelHeight, minWidth, maxWidth, placement })
+        : {
+            top: Math.max(8, (viewport.height - panelHeight) / 2),
+            left: (viewport.width - width) / 2,
+            width,
+          };
       setPos((prev) => {
         if (
           prev &&
@@ -149,7 +168,15 @@ export function SearchableSelect({
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [open, anchorRef, anchorKey, placement, minWidth, maxWidth]);
+  }, [open, portalRoot, anchorRef, anchorKey, placement, minWidth, maxWidth]);
+
+  useLayoutEffect(() => {
+    // The initial render is visibility:hidden until measured; autofocus on
+    // mount cannot focus it. Focus once it can receive keyboard input.
+    if (open && placed) {
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [open, placed, portalRoot, anchorKey]);
 
   const filteredLive = useMemo(() => {
     if (!open) return [];
@@ -195,7 +222,7 @@ export function SearchableSelect({
     };
   }, [open]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return undefined;
     const claim = (e: KeyboardEvent) => {
       try {
@@ -207,11 +234,21 @@ export function SearchableSelect({
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (literalInput && e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing || e.getModifierState('AltGraph') || githubCommandPaletteOwnsKey(e)) return;
       if (e.key === 'Escape') {
         // Claim before App shell close (window capture).
         claim(e);
+        const invoker = returnFocusRef.current;
         onClose?.();
+        if (invoker?.target.isConnected) {
+          invoker.target.focus({ preventScroll: true });
+        } else if (invoker?.composer?.isConnected) {
+          // An empty composer collapses after blur and removes its textarea.
+          invoker.composer.dispatchEvent(new CustomEvent('prp-composer-focus-input', {
+            bubbles: true,
+            cancelable: true,
+          }));
+        }
         return;
       }
       // ⌘/Ctrl+Enter confirms: multi → Apply selection; single → pick first/create.
@@ -267,7 +304,7 @@ export function SearchableSelect({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('mousedown', onDown, true);
     };
-  }, [open, onClose, anchorRef, literalInput]);
+  }, [open, onClose, anchorRef]);
 
   const selectedSet = useMemo(
     () => new Set(selected.map((s) => s.toLowerCase())),
@@ -383,8 +420,6 @@ export function SearchableSelect({
 
   // Portal layer above Conversation ShortcutHint (--prp-z-dialog 100100).
   const panelZ = 'var(--prp-z-portal, 120000)';
-  const anchored = Boolean(anchorRef);
-  const placed = Boolean(pos);
   const style: React.CSSProperties = placed
     ? {
         position: 'fixed',
@@ -408,9 +443,7 @@ export function SearchableSelect({
   const panel = (
     <div
       ref={panelRef}
-      className={`prp-sselect-panel prp-sselect-panel--popover${
-        !anchored && !placed ? ' prp-sselect-panel--center' : ''
-      }${multi ? ' prp-sselect-panel--multi' : ''}`}
+      className={`prp-sselect-panel prp-sselect-panel--popover${multi ? ' prp-sselect-panel--multi' : ''}`}
       role="dialog"
       aria-label={title || 'Select'}
       aria-multiselectable={multi || undefined}
@@ -422,18 +455,13 @@ export function SearchableSelect({
       {title ? <div className="prp-sselect-title">{title}</div> : null}
       {/* Search first so commit/file pickers open with filter ready */}
       <input
+        ref={inputRef}
         className="prp-sselect-input"
-        autoFocus
         placeholder={placeholder}
         value={query || ''}
         onChange={(e) => onQuery?.(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            onClose?.();
-            return;
-          }
+          if (e.nativeEvent.isComposing || e.nativeEvent.getModifierState('AltGraph') || githubCommandPaletteOwnsKey(e.nativeEvent)) return;
           if (multi && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.altKey) {
             e.preventDefault();
             e.stopPropagation();
@@ -453,7 +481,6 @@ export function SearchableSelect({
             }
           }
           if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-            if (literalInput && e.nativeEvent.isComposing) return;
             e.preventDefault();
             if (multi && !filtered[0] && !free && selected.length) {
               confirmMulti();
@@ -638,10 +665,6 @@ export function SearchableSelect({
   // Prefer .prp-overlay so --prp-bg / theme tokens inherit (body alone has none →
   // transparent panel). Fall back to body with a token-bearing shell.
   // Outer Opt tips stay on body at tip-z; data-prp-sselect-open hides them.
-  if (typeof document === 'undefined') return null;
-  const overlayHost =
-    (document.querySelector('.prp-overlay') as HTMLElement | null) || null;
-  const portalRoot = overlayHost || document.body;
   if (!portalRoot) return null;
   const onBody = portalRoot === document.body;
 

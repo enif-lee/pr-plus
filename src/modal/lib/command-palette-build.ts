@@ -565,14 +565,14 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       shortcut: optShortcutForCommandId('find-in-pr') || 'mod+f',
       action: 'openSearch',
     },
-    {
+    ...(!opts.isEmbed ? [{
       id: 'toggle-fullscreen',
       title: 'Toggle fullscreen',
       section: 'Navigate',
       keywords: ['fullscreen', 'maximize', 'expand', 'shell'],
       shortcut: optShortcutForCommandId('toggle-fullscreen') || 'opt+shift+f',
       action: 'toggleFullscreen',
-    },
+    }] : []),
     {
       id: 'edit-title',
       title: 'Edit PR title…',

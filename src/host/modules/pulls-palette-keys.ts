@@ -1,5 +1,6 @@
   // continued host module segment
   function onPullsListKeydown(event: any) {
+    if (event.defaultPrevented || event.isComposing || event.getModifierState?.('AltGraph')) return;
     // Escape / close races leave GH dialog in :modal — always schedule heal
     // (do not gate on current.open; embed can be open while top layer is stuck).
     if (event.key === 'Escape' || event.key === 'Esc') {
@@ -52,7 +53,6 @@
         hostEnabled,
         githubPaletteOpen: false,
         modalOpen: false,
-        editableTarget: isEditableKeyTarget(event.target),
       });
       const { action, digitIndex } =
         typeof pp.unwrapPullsPaletteAction === 'function'
@@ -71,6 +71,10 @@
           return;
         }
         if (action === 'closePalette') {
+          if (pullsPaletteRoot?.querySelector('[data-prp-pp-help]:not([hidden])')) {
+            togglePullsPaletteHelp(false);
+            return;
+          }
           closePullsPalette();
           return;
         }
@@ -84,17 +88,15 @@
         }
         if (action === 'activate') {
           activatePullsPaletteItem(
-            pullsPaletteFocusIndex >= 0 ? pullsPaletteFocusIndex : 0
+            pullsPaletteFocusIndex >= 0 ? pullsPaletteFocusIndex : 0,
+            true
           );
           return;
         }
-        // (selectDigit handled below)
         if (action === 'selectDigit') {
           const items = pullsPaletteItems || rebuildPullsPaletteItems() || [];
-          if (digitIndex >= 0 && digitIndex < items.length) {
-            pullsPaletteFocusIndex = digitIndex;
-            activatePullsPaletteItem(digitIndex);
-          }
+          const index = items.findIndex((item: any) => item.digit === digitIndex + 1);
+          if (index >= 0) activatePullsPaletteItem(index);
           return;
         }
       }
@@ -103,7 +105,7 @@
     // When palette is open, do not run list-row shortcuts
     if (isPullsPaletteOpen()) return;
 
-    if (!isPullsListPage()) return;
+    if (!isPullsListPage() || isEditableKeyTarget(event.target)) return;
 
     // Peer filter actions (⌥⇧G Assigned, ⌥⇧C Created, …) — floating dock
     if (alt && shift && !mod && typeof pp?.resolvePullsPeerOptAction === 'function') {
@@ -141,7 +143,6 @@
       alt,
       key: event.key,
       code: event.code,
-      editableTarget: isEditableKeyTarget(event.target),
       modalOpen: Boolean(current.open),
       isPullsList: true,
       hostEnabled,

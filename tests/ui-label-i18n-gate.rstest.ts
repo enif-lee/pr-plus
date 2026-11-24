@@ -1,5 +1,5 @@
 /**
- * Touched conversation badges use t(...); Agents.md documents UI-label i18n rule.
+ * Touched conversation badges use t(...); AGENTS.md documents UI-label i18n rule.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,8 +45,8 @@ describe('UI label i18n (touched surfaces + Agents policy)', () => {
     expect(formatMessage('pending', 'ko')).toBeTruthy();
   });
 
-  test('Agents.md requires UI labels to use i18n', () => {
-    const agents = read('Agents.md');
+  test('AGENTS.md requires UI labels to use i18n', () => {
+    const agents = read('AGENTS.md');
     expect(agents).toMatch(/UI labels \(i18n\)/i);
     expect(agents).toMatch(/useT\(\)/);
     expect(agents).toMatch(/must.*i18n|i18n.*must|must.*useT/i);

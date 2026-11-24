@@ -1,3 +1,4 @@
+import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@common/Button';
@@ -224,6 +225,7 @@ export function FinishReviewModal({
     }
 
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || githubCommandPaletteOwnsKey(e)) return;
       // Esc → blur finish input first; then close form (never PR shell here)
       if (e.key === 'Escape') {
         stop(e);

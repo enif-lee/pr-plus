@@ -43,6 +43,59 @@ const options = [
   { id: 'feature/a', label: 'feature/a' },
 ];
 
+describe('SearchableSelect focus', () => {
+  test('keeps search focused and positioned when its open portal moves to the PR overlay', async () => withHost(async (dom, host) => {
+    const { createRoot } = await import('react-dom/client');
+    const root = createRoot(host);
+    const trigger = document.createElement('button');
+    document.body.append(trigger);
+    trigger.focus();
+    let closed = false;
+    // Theme/layout can change the panel height after remounting into an overlay.
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() { return this.closest('.prp-overlay') ? 200 : 100; },
+    });
+    const render = (query: string) => act(async () => {
+      root.render(
+        <LocaleProvider uiLanguage="en">
+          <SearchableSelect open={!closed} query={query} options={options} multi
+            onClose={() => { closed = true; }} />
+        </LocaleProvider>
+      );
+    });
+    try {
+      await render('');
+      const original = document.querySelector('.prp-sselect-input');
+      const originalTop = window.innerHeight / 2 - 50;
+      expect(document.activeElement).toBe(original);
+      expect(document.querySelector<HTMLElement>('.prp-sselect-panel')!.style.top).toBe(`${originalTop}px`);
+
+      const overlay = document.createElement('div');
+      overlay.className = 'prp-overlay';
+      document.body.append(overlay);
+      await render('');
+      const input = overlay.querySelector('.prp-sselect-input');
+      expect(input).not.toBe(original);
+      expect(document.activeElement).toBe(input);
+      expect(overlay.querySelector<HTMLElement>('.prp-sselect-panel')!.style.top).toBe(`${originalTop - 50}px`);
+
+      // A background data/render update must not pull focus back from a
+      // control the user navigated to inside the same picker.
+      const item = overlay.querySelector<HTMLButtonElement>('.prp-sselect-item')!;
+      item.focus();
+      await render('main');
+      expect(document.activeElement).toBe(item);
+      await press(item, { key: 'Escape', cancelable: true });
+      expect(closed).toBe(true);
+      await render('');
+      expect(document.activeElement).toBe(trigger);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }));
+});
+
 describe('SearchableSelect literalInput (base branch picker)', () => {
   test('Enter submits the typed branch exactly, ahead of a partial match', async () => withHost(async (_d, host) => {
     const picks: any[] = [];

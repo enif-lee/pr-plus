@@ -15,6 +15,12 @@ E2E uses a **separate** config: `rstest.e2e.config.ts`.
 5. For a headed unpacked load (Linear overlay, popup), use **pikabo**: `npm run browser` / `npm run browser:linear`. That is a separate Chromium profile (`.browser/pikabo-profile`) because branded Chrome 137+ ignores `--load-extension`.
 6. Network access to `github.com/enif-lee/pr-plus`.
 
+## Offline shortcut regression
+
+`npm run build && node tests/e2e/shortcut-audit.mjs` runs against a fresh
+pikabo Chromium profile with fixture pages and a mock GitHub API. It does not
+require GitHub login or mutate a live PR.
+
 ## Demo PR fixture
 
 Default multi-thread / conversation target is **`DEMO_PR` in `lib/harness.mjs`**

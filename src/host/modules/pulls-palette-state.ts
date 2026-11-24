@@ -76,8 +76,8 @@
 
   function rebuildPullsPaletteItems() {
     const api = pullsPaletteApi();
-    const prs = resolveOpenPulls();
     const repo = getRepoForPalette();
+    const prs = resolveOpenPulls(repo.owner, repo.repo);
     const viewer = getViewerLoginForPalette();
     if (typeof api?.buildPullsPaletteItems === 'function') {
       pullsPaletteItems = api.buildPullsPaletteItems(prs, {

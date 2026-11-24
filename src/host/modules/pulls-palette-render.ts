@@ -654,12 +654,12 @@
     }
   }
 
-  function activatePullsPaletteItem(index: any) {
+  function activatePullsPaletteItem(index: any, preferAlias = false) {
     const api = pullsPaletteApi();
     const items = pullsPaletteItems || rebuildPullsPaletteItems() || [];
-    // Prefer exact alias (am/my/np) over stale focus index
+    // Enter recognizes exact aliases; clicks and digit shortcuts target a row.
     const resolvedIdx =
-      typeof api?.resolveActivateIndex === 'function'
+      preferAlias && typeof api?.resolveActivateIndex === 'function'
         ? api.resolveActivateIndex(items, index, pullsPaletteQuery)
         : index;
     const item = items[resolvedIdx];

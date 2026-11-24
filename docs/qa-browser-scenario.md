@@ -29,7 +29,7 @@ Live write APIs (real resolve/submit/merge) are **manual-only** unless explicitl
 | Open from pulls | Click PR title | `.prp-overlay`, `data-layout=conversation` |
 | Layout | ⌥. | `data-layout` flips; keep-alive panels; one `--active` |
 | Conv step nav | ⌥⇧C seed/clear · ⌥J/K | `.prp-card--kb-focus` / group row; top **24px** |
-| Conv context | ⌥F fold · ⌥D Diff · ⌥C reply/submit · ⌥⌃R resolve | Active panel only; tips on focused host |
+| Conv context | ⌥F fold · ⌥D Diff · ⌥I reply · ⌥C submit · ⌥⌃R resolve | Active panel only; tips on focused host |
 | Diff step nav | ⌥J/K threads | Third-align scroll; `activeDiffCommentId` tips |
 | Diff files | ⌥⇧[ ] · ⌥B · ⌥U/R/P · ⌥⇧R viewed | DFS order; filter chips; nav collapse |
 | Diff selection | Drag / arrows · island · ⌥C | `.prp-selection-*`; Esc cascade |
@@ -66,9 +66,9 @@ Sources: `shortcut-policy.ts`, `PrModalApp.tsx`, `VirtualConversationList.tsx`, 
 | P1.3 | Nav across review-group path rows | ScrollTop changes between group rows; still top band when not near list end |
 | P1.4 | ⌥F on focused thread | Fold/expand; `collapsed` class / `aria-expanded` toggles |
 | P1.5 | ⌥D on thread with path | Switches to Diff; thread revealed (~⅓ viewport) |
-| P1.6 | ⌥C (1st) | Reply `textarea.prp-mdc__ta` focused; ghost opens if needed |
+| P1.6 | ⌥I | Reply `textarea.prp-mdc__ta` focused; ghost opens if needed |
 | P1.7 | Type in reply | Smooth typing (draft leaf store; no full-tree lag) |
-| P1.8 | ⌥C (2nd) non-empty draft | Submit path enabled (avoid live post in automated runs unless intended) |
+| P1.8 | ⌥C with a non-empty draft | Submit path enabled (avoid live post in automated runs unless intended) |
 | P1.9 | Esc in reply | **Blur only**; `.prp-overlay` remains |
 | P1.10 | ⌥⌃R when resolve available | Resolve/unresolve (needs `threadNodeId`; skip if pending-only) |
 | P1.11 | ⌥↑ / ⌥↓ | Timeline panel scrolls without changing focus |
@@ -86,7 +86,7 @@ Sources: `shortcut-policy.ts`, `PrModalApp.tsx`, `VirtualConversationList.tsx`, 
 |---|------|--------|
 | P2.1 | On Diff, ⌥J/K ×N | Thread nav; **offset/vh ≈ 0.27–0.37**; no multi-pass thrash |
 | P2.2 | ⌥F | Collapse/expand active InlineThread |
-| P2.3 | ⌥C | Focus reply in Diff thread (active panel only) |
+| P2.3 | ⌥I | Focus reply in Diff thread (active panel only) |
 | P2.4 | ⌥D | Re-reveal active thread (stay on Diff) |
 | P2.5 | ⌥⇧[ / ⌥⇧] | Prev/next file in **DFS displayFiles** order |
 | P2.6 | ⌥U / ⌥R / ⌥P | Review filters toggle; same again clears |
@@ -95,7 +95,7 @@ Sources: `shortcut-policy.ts`, `PrModalApp.tsx`, `VirtualConversationList.tsx`, 
 | P2.9 | ⌥⇧↑ / ⌥⇧↓ | Diff page scroll ~0.9 viewport |
 | P2.10 | ⌥↑ / ⌥↓ | Multi-line selection jump (~8 rows) + reveal |
 | P2.11 | ↑ / ↓ / ⇧↑ / ⇧↓ | One-row selection move/extend; minimal reveal pad |
-| P2.12 | Context Opt tips | ⌥F / ⌥C tips only on **active** thread (`activeDiffCommentId`) |
+| P2.12 | Context Opt tips | ⌥F / ⌥I tips only on **active** thread (`activeDiffCommentId`) |
 | P2.13 | Ext chips / unread filter | Tree filters reshape list; multi-select ext |
 | P2.14 | Unified / Split | Toolbar radios change `diffMode` |
 | P2.15 | Commits picker | Multi-select commits reshapes diff (if multi-commit PR) |
@@ -121,17 +121,18 @@ Sources: `shortcut-policy.ts`, `PrModalApp.tsx`, `VirtualConversationList.tsx`, 
 | # | Step | Expect |
 |---|------|--------|
 | P4.1 | ⌘F / Ctrl+F | Find bar; focus input |
-| P4.2 | Type query · Enter / ⇧Enter | Hits; next/prev; Diff: search in toolbar, filters hide |
+| P4.2 | Type query · Enter / ⇧Enter or ⌥J / ⌥K | Hits; next/prev; Diff: search in toolbar, filters hide |
 | P4.3 | Esc in Find | Closes Find only |
 | P4.4 | ⌥⇧K | Command palette (`.prp-pp-layer`); not GH ⌘K |
 | P4.5 | Filter + Enter command | Runs; palette closes |
-| P4.6 | Esc in palette | Palette closes; modal stays |
+| P4.6 | Esc in palette | Closes Help first if open, then palette; modal stays |
 | P4.7 | Opt hold | Shortcut badges on mapped controls; hide after chord until release |
 | P4.8 | Stack chips / ⌥1–9 | If stack ≥2, switch PR; path fork hover if applicable |
 | P4.9 | ⌥[ / ⌥] | Adjacent PR (stack path or pulls list order) |
 | P4.10 | Header: layout / refresh / GitHub link | Layout flips; refresh stages; external link |
 | P4.11 | Fullscreen ⌥⇧F (Conversation, non-embed) | `data-fullscreen` toggles |
 | P4.12 | Title edit ⌥⇧T | Input; Esc cancels without closing modal |
+| P4.13 | Base branch ⌥⇧B (Conversation) | Branch input opens focused; type and Enter. Verify the change against the mock API, not a live PR in automation. |
 
 ---
 
