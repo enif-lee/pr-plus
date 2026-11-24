@@ -230,15 +230,6 @@
     }
   }
 
-  function onAutoRefreshVisibility() {
-    if (typeof document === 'undefined') return;
-    if (document.visibilityState === 'visible') {
-      // Resume: one immediate tick if still within activity window
-      noteAutoRefreshAction({ force: true });
-      void tickAutoRefresh({ force: true });
-    }
-  }
-
   function onAutoRefreshUserEvent() {
     noteAutoRefreshAction();
   }
@@ -251,12 +242,10 @@
     if (!autoRefreshListenersInstalled) {
       autoRefreshListenersInstalled = true;
       try {
-        document.addEventListener(
-          'visibilitychange',
-          onAutoRefreshVisibility,
-          false
-        );
-        window.addEventListener('focus', onAutoRefreshVisibility);
+        autoRefreshApi()?.watchTabFocusReturn?.(window, document, (shouldRefresh: boolean) => {
+          noteAutoRefreshAction({ force: true });
+          if (shouldRefresh) void tickAutoRefresh({ force: true });
+        });
         // Capture-phase so we see events inside shadow hosts / modal
         const opts = { capture: true, passive: true };
         document.addEventListener('pointerdown', onAutoRefreshUserEvent, opts);

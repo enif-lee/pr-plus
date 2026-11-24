@@ -1,12 +1,42 @@
 /**
- * Auto-refresh gate for open PR surfaces (modal overlay + full-page embed).
- * Poll only when the tab is visible and the user was active recently.
+ * Tab-return refresh policy for PR lists and open PR surfaces.
+ * Open PR polling also requires a visible tab and recent user activity.
  */
 
 export const AUTO_REFRESH_IDLE_MS = 10 * 60 * 1000;
 export const AUTO_REFRESH_POLL_MS = 45 * 1000;
+const FOCUS_REFRESH_MIN_AWAY_MS = 60_000;
 /** Throttle how often pointer/scroll bumps lastActionAt */
 export const AUTO_REFRESH_ACTION_THROTTLE_MS = 1000;
+
+/** Report each return once, regardless of focus/visibility event order. */
+export function watchTabFocusReturn(
+  win: Window,
+  doc: Document,
+  onReturn: (shouldRefresh: boolean) => void
+): () => void {
+  let awaySince: number | null = null;
+  const onChange = () => {
+    const now = Date.now();
+    if (doc.visibilityState !== 'visible' || !doc.hasFocus()) {
+      awaySince ??= now;
+      return;
+    }
+    if (awaySince === null) return;
+    const shouldRefresh = now - awaySince >= FOCUS_REFRESH_MIN_AWAY_MS;
+    awaySince = null;
+    onReturn(shouldRefresh);
+  };
+  onChange();
+  win.addEventListener('blur', onChange);
+  win.addEventListener('focus', onChange);
+  doc.addEventListener('visibilitychange', onChange);
+  return () => {
+    win.removeEventListener('blur', onChange);
+    win.removeEventListener('focus', onChange);
+    doc.removeEventListener('visibilitychange', onChange);
+  };
+}
 
 export type AutoRefreshGateInput = {
   /** pr+ surface is showing a PR (modal, sheet, or embed) */

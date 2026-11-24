@@ -1,14 +1,67 @@
 /**
  * rstest — auto-refresh activity gate (modal + full-page embed).
  */
-import { describe, expect, test } from '@rstest/core';
+import { describe, expect, rs, test } from '@rstest/core';
 import {
   AUTO_REFRESH_IDLE_MS,
   canAutoRefresh,
   headProbeIndicatesStale,
   nextActionAt,
   prProbeIndicatesStale,
+  watchTabFocusReturn,
 } from '../src/modal/lib/auto-refresh';
+
+describe('watchTabFocusReturn', () => {
+  test('counts from the first loss of focus and waits for both visibility and focus', () => {
+    let now = 0;
+    const clock = rs.spyOn(Date, 'now').mockImplementation(() => now);
+    const win = new EventTarget();
+    let focused = true;
+    const doc = Object.assign(new EventTarget(), {
+      visibilityState: 'visible',
+      hasFocus: () => focused,
+    });
+    const onReturn = rs.fn();
+    const stop = watchTabFocusReturn(win as Window, doc as unknown as Document, onReturn);
+    const focus = (value: boolean) => {
+      focused = value;
+      win.dispatchEvent(new Event(value ? 'focus' : 'blur'));
+    };
+    const visibility = (value: string) => {
+      doc.visibilityState = value;
+      doc.dispatchEvent(new Event('visibilitychange'));
+    };
+    try {
+      focus(true);
+      expect(onReturn).not.toHaveBeenCalled();
+
+      focus(false);
+      now = 59_999;
+      focus(true);
+      expect(onReturn).toHaveBeenLastCalledWith(false);
+
+      focus(false);
+      now += 1;
+      visibility('hidden');
+      now += 59_999;
+      visibility('visible');
+      expect(onReturn).toHaveBeenCalledTimes(1);
+      focus(true);
+      expect(onReturn).toHaveBeenLastCalledWith(true);
+      visibility('visible');
+      expect(onReturn).toHaveBeenCalledTimes(2);
+
+      stop();
+      focus(false);
+      now += 60_000;
+      focus(true);
+      expect(onReturn).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+      clock.mockRestore();
+    }
+  });
+});
 
 describe('canAutoRefresh', () => {
   const base = {

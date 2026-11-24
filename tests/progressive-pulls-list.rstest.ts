@@ -14,15 +14,16 @@ const prs = [
   { number: 1, title: 'Root', baseRef: 'main', headRef: 'root', author: 'alice' },
   { number: 2, title: 'Child', baseRef: 'root', headRef: 'child', author: 'bob' },
 ];
-function setup(options: { tree?: boolean; rest?: Promise<any[]>; fetch?: () => Promise<any[]> } = {}) {
+function setup(options: { tree?: boolean; rest?: Promise<any[]>; fetch?: () => Promise<any[]>; now?: () => number } = {}) {
   const page = new JSDOM(`<main><header><h1 data-testid="header-title">Pull requests</h1></header><ul>${[2, 1].map(n =>
     `<li class="PullsListItem-module__listItem"><input type="checkbox"><div data-listview-item-title-container="true"><h3><a data-testid="listitem-title-link" href="/o/r/pull/${n}">PR ${n}</a></h3></div><div class="Description-module__container"><span>#${n}</span><a data-testid="author-filter-link">alice</a></div></li>`).join('')}</ul></main>`,
-  { url: 'https://github.com/o/r/pulls' });
+  { url: 'https://github.com/o/r/pulls', pretendToBeVisual: true });
   const sandbox: any = { module: { exports: {} }, console,
+    Date: class extends Date { static now() { return options.now?.() ?? Date.now(); } },
     MutationObserver: page.window.MutationObserver, Event: page.window.Event,
     clearTimeout: page.window.clearTimeout.bind(page.window) };
   sandbox.globalThis = sandbox;
-  for (const name of ['tree', 'dom', 'content-bootstrap']) {
+  for (const name of ['tree', 'dom', 'modal/pure/auto-refresh', 'content-bootstrap']) {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, `../src/${name}.js`), 'utf8'), sandbox);
   }
   const requests: any[] = [];
@@ -52,19 +53,39 @@ const patch = { number: 2, viewerDidAuthor: true, additions: 1500, deletions: 3,
   listChecksState: 'SUCCESS', listChecksPassed: 4, listChecksTotal: 4 };
 
 describe('progressive pulls list', () => {
-  for (const event of ['focus', 'turbo:load']) {
+  for (const event of ['focus after a minute away', 'turbo:load']) {
     test(`${event} revalidates branch metadata even with unchanged PR numbers`, async () => {
       let latest = prs.map(pr => ({ ...pr }));
-      const h = setup({ fetch: async () => latest });
+      let now = Date.now();
+      const h = setup({ fetch: async () => latest, now: () => now });
       let watch: any;
       try {
         await h.app.bootstrap();
         await h.tick();
         h.requests[0].pending.resolve([patch]);
         await h.tick();
+        const win = h.page.window;
+        let focused = true;
+        h.doc.hasFocus = () => focused;
         watch = h.app.watchPullsPage();
         latest = prs.map(pr => ({ ...pr, baseRef: 'main' }));
-        h.page.window.dispatchEvent(new h.page.window.Event(event));
+        if (event === 'focus after a minute away') {
+          const setFocus = (value: boolean) => {
+            focused = value;
+            win.dispatchEvent(new win.Event(value ? 'focus' : 'blur'));
+          };
+          setFocus(false);
+          now += 59_999;
+          setFocus(true);
+          await h.app.handlePageChange();
+          expect(h.restOptions).toHaveLength(1);
+
+          setFocus(false);
+          now += 60_000;
+          setFocus(true);
+        } else {
+          win.dispatchEvent(new win.Event(event));
+        }
         const deadline = Date.now() + 2000;
         while (h.requests.length < 2 && Date.now() < deadline) {
           await new Promise(resolve => h.page.window.setTimeout(resolve, 5));

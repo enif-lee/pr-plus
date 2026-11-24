@@ -714,6 +714,11 @@ function createPrTreeApp(deps: any) {
       refreshRequested = true;
       scheduleSync(50);
     };
+    const unwatchTabFocus = (globalThis as any).PRModalAutoRefresh?.watchTabFocusReturn?.(
+      window, document, (shouldRefresh: boolean) => {
+        if (shouldRefresh) onRefresh();
+      }
+    );
     window.addEventListener('popstate', onNav);
     window.addEventListener('hashchange', onNav);
     window.addEventListener('pr-tree-location', onNav);
@@ -724,7 +729,6 @@ function createPrTreeApp(deps: any) {
     window.addEventListener('pjax:complete', onRefresh);
     window.addEventListener('pjax:end', onRefresh);
     window.addEventListener('pageshow', onRefresh);
-    window.addEventListener('focus', onRefresh);
 
     const unpatchHistory = patchHistoryNavigation();
 
@@ -752,9 +756,10 @@ function createPrTreeApp(deps: any) {
         for (const event of ['popstate', 'hashchange', 'pr-tree-location', 'turbo:before-render']) {
           window.removeEventListener(event, onNav);
         }
-        for (const event of ['turbo:load', 'turbo:render', 'turbo:frame-load', 'pjax:complete', 'pjax:end', 'pageshow', 'focus']) {
+        for (const event of ['turbo:load', 'turbo:render', 'turbo:frame-load', 'pjax:complete', 'pjax:end', 'pageshow']) {
           window.removeEventListener(event, onRefresh);
         }
+        unwatchTabFocus?.();
         unpatchHistory();
         window.clearInterval(hrefPoll);
         clearTimeout(syncTimer);
