@@ -466,6 +466,7 @@ export function FileHeaderRow(props: {
         <button
           type="button"
           className="prp-file-header__comment"
+          data-prp-palette-control={focused ? 'comment-file' : undefined}
           title="Comment on entire file"
           onClick={(e) => {
             e.stopPropagation();

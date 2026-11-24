@@ -444,7 +444,9 @@ try {
   await embed.locator('.prp-overlay[data-layout="conversation"]').waitFor();
   await new Promise(resolve => setTimeout(resolve, 400)); // longer than the selection route debounce
   assert.equal(new URL(page.url()).pathname, '/o/r/pull/1');
-  await press('Alt+Shift+e');
+  await press('Alt+Shift+k');
+  await palette.locator('input').fill('restore native');
+  await palette.getByRole('option').filter({ hasText: 'Return to GitHub’s native PR view' }).click();
   await embed.waitFor({ state: 'hidden' });
   console.log('PASS: native PR → embed → picker, palette, Find and Goto local keys → native PR');
 
@@ -465,7 +467,15 @@ try {
   assert.equal(await listPalette.isVisible(), true);
   await press('Escape');
   await listPalette.waitFor({ state: 'hidden' });
-  console.log('PASS: /pulls search input and command palette Help/Escape ownership');
+  const treeToggle = page.locator('#pr-tree-toggle');
+  await treeToggle.waitFor();
+  const treeLabel = await treeToggle.textContent();
+  await press('Alt+Shift+k');
+  await listPalette.locator('input').fill('stack tree');
+  await listPalette.locator('.prp-pp-item__title').filter({ hasText: /^Switch between stack tree and default PR list$/ }).click();
+  await listPalette.waitFor({ state: 'hidden' });
+  assert.notEqual(await treeToggle.textContent(), treeLabel);
+  console.log('PASS: /pulls search, palette Help/Escape and list/stack toggle');
 } finally {
   await session.close();
 }

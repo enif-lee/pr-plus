@@ -19,6 +19,13 @@ export const CONVERSATION_SIDE_META_ACTIONS = [
   'promptRemoveReviewer',
   'promptRemoveAssignee',
   'rerequestReview',
+  'removeReviewer',
+  'removeAssignee',
+  'toggleLabel',
+  'editBody',
+  'focusComment',
+  'loadMoreThreads',
+  'deleteHeadBranch',
 ] as const;
 
 /**

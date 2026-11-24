@@ -981,9 +981,18 @@ function InlineThreadImpl(props: any) {
                   const rootIdKey = String(row?.commentId || thread?.id || '');
                   const rootMin = isCommentMinimized(rootMinimizeMeta);
                   const rootShown = Boolean(expandedMinimized[rootIdKey]);
+                  const rootUnitActive =
+                    contextActive &&
+                    (!focusedThreadUnitId ||
+                      String(focusedThreadUnitId) === rootIdKey);
                   if (rootMin && !rootShown) {
                     return (
-                      <li className="prp-review-thread__item prp-review-thread__item--minimized">
+                      <li
+                        className={`prp-review-thread__item prp-review-thread__item--minimized${rootUnitActive ? ' prp-review-thread__item--unit-focus' : ''}`}
+                        data-prp-thread-unit="root"
+                        data-prp-thread-unit-id={rootIdKey}
+                        data-prp-thread-unit-active={rootUnitActive ? '1' : undefined}
+                      >
                         {renderMinimizedBanner(
                           row?.commentId || thread?.id,
                           rootMinimizeMeta,
@@ -992,10 +1001,6 @@ function InlineThreadImpl(props: any) {
                       </li>
                     );
                   }
-                  const rootUnitActive =
-                    contextActive &&
-                    (!focusedThreadUnitId ||
-                      String(focusedThreadUnitId) === rootIdKey);
                   return (
                 <li
                   className={`prp-review-thread__item${
@@ -1078,13 +1083,20 @@ function InlineThreadImpl(props: any) {
                   };
                   const replyMin = isCommentMinimized(replyMeta);
                   const replyShown = Boolean(expandedMinimized[String(r.id)]);
+                  const replyUnitActive =
+                    contextActive &&
+                    focusedThreadUnitId != null &&
+                    String(focusedThreadUnitId) === String(r.id);
                   if (replyMin && !replyShown) {
                     return (
                       <li
                         key={r.id}
                         className={`prp-review-thread__item prp-review-thread__item--minimized${
                           isLast ? ' prp-review-thread__item--last' : ''
-                        }`}
+                        }${replyUnitActive ? ' prp-review-thread__item--unit-focus' : ''}`}
+                        data-prp-thread-unit="reply"
+                        data-prp-thread-unit-id={String(r.id)}
+                        data-prp-thread-unit-active={replyUnitActive ? '1' : undefined}
                       >
                         {renderMinimizedBanner(r.id, replyMeta, {
                           compact: true,
@@ -1092,10 +1104,6 @@ function InlineThreadImpl(props: any) {
                       </li>
                     );
                   }
-                  const replyUnitActive =
-                    contextActive &&
-                    focusedThreadUnitId != null &&
-                    String(focusedThreadUnitId) === String(r.id);
                   return (
                     <li
                       key={r.id}

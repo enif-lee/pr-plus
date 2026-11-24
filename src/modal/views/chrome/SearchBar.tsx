@@ -171,6 +171,7 @@ export const SearchBar = memo(function SearchBar({
           size="sm"
           variant="primary"
           className="prp-search__load-comments"
+          data-prp-palette-control="search-load-comments"
           disabled={busy || loadCommentsBusy}
           onClick={(): any => void onLoadComments?.()}
           title="Load every remaining review thread/comment for full-text search"

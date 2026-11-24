@@ -1,5 +1,5 @@
 import { githubCommandPaletteOwnsKey } from '@lib/shortcut-policy-keys';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   filterPaletteCommands,
   formatShortcut,
@@ -146,7 +146,8 @@ export function CommandPalette({
   open,
   query: queryProp,
   onQuery,
-  commands,
+  commands: providedCommands,
+  readCommands,
   onRun,
   onClose,
   openPulls = [],
@@ -161,6 +162,11 @@ export function CommandPalette({
   repo = '',
 }: any) {
   const t = useT();
+  const [liveCommands, setLiveCommands] = useState([]);
+  useLayoutEffect(() => {
+    if (open && readCommands) setLiveCommands(readCommands());
+  }, [open, readCommands]);
+  const commands = readCommands ? liveCommands : providedCommands;
   const storeQuery = useModalStore((s) => s.paletteQuery);
   const storeSetQuery = useModalStore((s) => s.setPaletteQuery);
   const query = queryProp !== undefined ? queryProp : storeQuery;
@@ -318,10 +324,11 @@ export function CommandPalette({
             : 'centered',
         locale,
         isEmbed,
+        commands,
       });
     }
     return [];
-  }, [helpEntriesProp, detail, layoutMode, isEmbed, open]);
+  }, [helpEntriesProp, detail, layoutMode, isEmbed, commands]);
 
   const filtered = useMemo(() => {
     if (prSearch.isPrSearch) {

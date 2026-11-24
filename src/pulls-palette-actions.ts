@@ -186,6 +186,11 @@ export function buildPullsPaletteItems(prs: any, opts: any = {}) {
 
   // Peer action rows (create / filters) — only when query matches; same shape as PRs
   for (const def of PULLS_PALETTE_ACTIONS) {
+    if (def.action === 'togglePullsTree') {
+      if (!opts.treeToggleTitle || !actionMatchesQuery({ ...def, title: opts.treeToggleTitle }, query)) continue;
+      items.push({ ...def, title: opts.treeToggleTitle });
+      continue;
+    }
     if (!actionMatchesQuery(def, query)) continue;
     const aliasHint = (def.aliases || []).join(' · ');
     if (def.action === 'createPullRequest') {
@@ -488,8 +493,8 @@ export function unwrapPullsPaletteAction(resolved: any) {
  * Pulls-scope only: create/filters/help — not modal Diff/Conversation chords.
  * @returns {Array<{ title: string, aliases: string[], primary: string, shortcut?: string|null }>}
  */
-export function buildPullsPaletteHelpEntries() {
-  return PULLS_PALETTE_ACTIONS.map((a) => {
+export function buildPullsPaletteHelpEntries({ treeToggleTitle = null }: { treeToggleTitle?: string | null } = {}) {
+  return PULLS_PALETTE_ACTIONS.filter((a) => a.action !== 'togglePullsTree' || treeToggleTitle).map((a) => {
     const aliases = Array.isArray(a.aliases)
       ? a.aliases.map((x) => String(x).toLowerCase()).filter(Boolean)
       : [];
@@ -505,7 +510,7 @@ export function buildPullsPaletteHelpEntries() {
     ];
     return {
       id: a.id,
-      title: String(a.title || a.id),
+      title: String(a.action === 'togglePullsTree' ? treeToggleTitle : a.title || a.id),
       aliases: displayAliases,
       primary: aliases[0] || displayAliases[0] || '',
       action: a.action,

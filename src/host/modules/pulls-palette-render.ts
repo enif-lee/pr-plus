@@ -171,7 +171,7 @@
     const api = pullsPaletteApi();
     const entries =
       typeof api?.buildPullsPaletteHelpEntries === 'function'
-        ? api.buildPullsPaletteHelpEntries()
+        ? api.buildPullsPaletteHelpEntries({ treeToggleTitle: pullsTreeToggleTitle() })
         : [];
     if (!entries.length) {
       const empty = pullsPaletteMsg(
@@ -213,6 +213,13 @@
     if (item.action === 'toggleFiltersMenu') {
       closePullsPalette();
       queueMicrotask(() => toggleFiltersMenu());
+      return true;
+    }
+    if (item.action === 'togglePullsTree') {
+      const toggle = document.getElementById('pr-tree-toggle');
+      if (!toggle) return false;
+      closePullsPalette();
+      toggle.click();
       return true;
     }
 

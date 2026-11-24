@@ -1,7 +1,8 @@
 /** Command palette action runner extracted from PrModalApp */
 import { buildGithubPrPageUrl } from '../lib/ui-polish';
-import { copyTextToClipboard } from '../lib/copy-to-clipboard';
+import { branchRefCopyText, copyTextToClipboard } from '../lib/copy-to-clipboard';
 import { isSideActionAllowedOnLayout } from '../lib/layout-side-actions';
+import { formatMessage } from '../lib/i18n';
 
 export function runPaletteCommand(d: Record<string, any>, cmd: any) {
   const {
@@ -30,6 +31,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     setSelectionIslandPhase, setShowSelectionComposer, setPicker, closePicker,
     useModalStore: useModalStoreDep, uiRef, isReviewVerdictKind, isViewerPrAuthor,
     onSetMilestone,
+    onDeleteHeadBranch, runPaletteUiCommand, appLocale,
   } = d;
   // Optional helpers (may be provided by App or fall back to global / no-op)
   const runCtx =
@@ -69,6 +71,26 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
     return;
   }
   switch (action) {
+    case 'paletteUi':
+      runPaletteUiCommand?.(cmd.id, p.control);
+      break;
+    case 'copyBranchName': {
+      if (p.branch !== 'base' && p.branch !== 'head') break;
+      const ref = branchRefCopyText(detail?.[`${p.branch}Ref`]);
+      if (!ref) break;
+      void copyTextToClipboard(ref).then((ok) => {
+        setActionMsg?.(formatMessage(ok ? 'header_branch_copied' : 'header_copy_failed', appLocale));
+      });
+      break;
+    }
+    case 'openBranchPage':
+      if (p.branch === 'base' || p.branch === 'head') {
+        d.overlay?.querySelector(`.prp-branch-tag--${p.branch} a`)?.click();
+      }
+      break;
+    case 'deleteHeadBranch':
+      void onDeleteHeadBranch?.();
+      break;
     case 'openPullRequest': {
       const n = Number(p.number ?? cmd.number);
       if (Number.isFinite(n) && n > 0) openStackOrListPr(n);
@@ -129,7 +151,7 @@ export function runPaletteCommand(d: Record<string, any>, cmd: any) {
       onDiscardPendingReview?.();
       break;
     case 'loadMoreThreads':
-      loadMoreReviewThreads?.();
+      loadMoreReviewThreads?.(p.mode);
       break;
     case 'openDiffGoto':
       try {

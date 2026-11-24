@@ -9,6 +9,10 @@
  *   mod+shift+X  → opt+shift+X
  */
 import { allowedMergeMethods, canUpdateBranch } from './merge-box-status';
+import { shouldShowDeleteHeadBranch } from './delete-head-branch';
+
+import { branchRefCopyText } from './copy-to-clipboard';
+import { isSideActionAllowedOnLayout } from './layout-side-actions';
 
 import {
   optShortcutForCommandId,
@@ -25,7 +29,7 @@ function localizePaletteCommand(cmd: any, locale: string) {
     ? `palette_sec_${sectionRaw.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
     : '';
   let title = cmd.title;
-  if (titleKey) {
+  if (titleKey && !cmd.localizedTitle) {
     const m = formatMessage(titleKey, locale);
     if (m && m !== titleKey) title = m;
   }
@@ -760,6 +764,7 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
       section: 'Conversation',
       keywords: ['load', 'more', 'threads', 'comments'],
       action: 'loadMoreThreads',
+      payload: { mode: 'more' },
     },
     ...(allowReviewVerdict
       ? [
@@ -877,13 +882,26 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
     });
   }
 
-  if (d.baseRef) {
+  for (const branch of ['base', 'head'] as const) {
+    const ref = branchRefCopyText(d[`${branch}Ref`]);
+    if (!ref) continue;
+    const keywords = [branch, 'branch', 'ref', ref, ...(branch === 'head' ? ['source', 'current'] : ['target'])];
     cmds.push({
-      id: 'base-current',
-      title: `Current base: ${d.baseRef}`,
-      section: 'PR',
-      keywords: ['base', d.baseRef],
-      action: 'noop',
+      id: `copy-${branch}-branch`, section: 'PR', keywords: ['copy', 'clipboard', ...keywords],
+      action: 'copyBranchName', payload: { branch },
+    });
+    if ((d[`${branch}Owner`] || d.owner) && (d[`${branch}Repo`] || d.repo)) {
+      cmds.push({
+        id: `open-${branch}-branch`, section: 'Navigate', keywords: ['open', 'github', ...keywords],
+        action: 'openBranchPage', payload: { branch },
+      });
+    }
+  }
+  if (!isDiffLayout && shouldShowDeleteHeadBranch(d)) {
+    cmds.push({
+      id: 'delete-head-branch', title: formatMessage('merge_delete_branch_title', opts.locale || 'en'),
+      localizedTitle: true, section: 'PR', keywords: ['delete', 'branch', 'head', d.headRef],
+      action: 'deleteHeadBranch',
     });
   }
 
@@ -935,7 +953,10 @@ export function buildPaletteCommands(detail: any, opts: any = {}) {
 
   // Localize titles/sections for the active app locale (opts.locale)
   const locale = String(opts.locale || opts.appLocale || 'en');
-  return localizePaletteCommands(cmds, locale);
+  return localizePaletteCommands([...cmds, ...(opts.uiCommands || [])].filter((cmd) =>
+    isSideActionAllowedOnLayout(cmd.action, layoutMode) &&
+    (opts.isCommandAvailable?.(cmd) ?? true)
+  ), locale);
 }
 
 /**

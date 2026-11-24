@@ -43,6 +43,7 @@ export function buildModalPaletteHelpEntries(
     canSubmitReviewVerdict?: boolean;
     locale?: string;
     isEmbed?: boolean;
+    commands?: ReturnType<typeof buildPaletteCommands>;
   } = {}
 ): Array<{
   id: string;
@@ -53,7 +54,7 @@ export function buildModalPaletteHelpEntries(
   shortcut?: string | null;
   section?: string;
 }> {
-  const cmds = buildPaletteCommands(detail, opts);
+  const cmds = opts.commands ?? buildPaletteCommands(detail, opts);
   const out: Array<{
     id: string;
     title: string;

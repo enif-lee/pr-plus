@@ -257,6 +257,13 @@ export const PULLS_PALETTE_ACTIONS = [
     keywords: ['menu', 'dropdown', 'filter'],
   },
   {
+    id: 'toggle-pulls-tree',
+    kind: 'action',
+    action: 'togglePullsTree',
+    aliases: ['tree', 'stack tree'],
+    keywords: ['list', 'tree', 'stack', 'default', 'order'],
+  },
+  {
     id: 'toggle-help',
     kind: 'action',
     action: 'toggleHelp',

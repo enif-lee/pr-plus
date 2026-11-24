@@ -320,6 +320,7 @@ function FolderFileTreeImpl(props: any) {
         <div className="prp-filetree__search-row">
           <input
             className="prp-filetree__search-input"
+            data-prp-palette-control="search-file-tree"
             placeholder={
               filesLoading
                 ? t('aside_loading_all_files')

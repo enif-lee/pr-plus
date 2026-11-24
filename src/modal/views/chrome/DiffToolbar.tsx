@@ -469,6 +469,7 @@ export function DiffToolbar(props: any) {
             type="button"
             ref={commitBtnRef}
             className="prp-diff-toolbar__commit-btn"
+            data-prp-palette-control="filter-commits"
             disabled={commitDisabled || (commitLoading && !commitOpts.length)}
             onClick={() => {
               setCommitPickerOpen((o) => {

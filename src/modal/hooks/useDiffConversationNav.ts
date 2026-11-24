@@ -3114,10 +3114,9 @@ export function useDiffConversationNav(b: any) {
     }
   }
 
-  function loadMoreReviewThreads() {
+  function loadMoreReviewThreads(mode?: string) {
     if (typeof onLoadMoreReviewThreads !== 'function') return;
-    // Banner "Load all" drains threads + remaining timeline pages.
-    void onLoadMoreReviewThreads('all');
+    void onLoadMoreReviewThreads(mode ?? 'all');
   }
 
   function toggleHideOutdated() {
@@ -3130,7 +3129,7 @@ export function useDiffConversationNav(b: any) {
     patchDiffReviewFilter({ hideOutdated: !cur });
   }
 
-  function expandHunkAtCaret() {
+  function expandHunkAtCaret(direction: 'fromEnd' | 'fromStart' | 'all' = 'all', run = true) {
     if (layoutMode !== LAYOUT_DIFF) return;
     try {
       const el = listRef.current as HTMLElement | null;
@@ -3151,7 +3150,7 @@ export function useDiffConversationNav(b: any) {
       const oy = originRect ? (originRect.top + originRect.bottom) / 2 : 0;
       const buttons = [
         ...el.querySelectorAll(
-          '.prp-hunk-expand__btn--all, .prp-hunk-expand__btn[data-expand-dir="all"]'
+          `.prp-hunk-expand__btn[data-expand-dir="${direction}"]`
         ),
       ] as HTMLElement[];
       if (!buttons.length) return;
@@ -3168,7 +3167,8 @@ export function useDiffConversationNav(b: any) {
           best = btn;
         }
       }
-      best?.click();
+      if (run) best?.click();
+      return Boolean(best);
     } catch {
       /* ignore */
     }

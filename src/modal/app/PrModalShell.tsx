@@ -302,6 +302,12 @@ import {
   applyResolveStamps,
 } from '../lib/pr-edit-api';
 import { runPaletteCommand as runPaletteCommandImpl } from './pr-modal-run-palette';
+import { activatePaletteControl, collectPaletteControls, openPaletteAsideSection, PALETTE_COMPOSER, PALETTE_TIMELINE_KINDS, readPaletteLinks, type ConversationPaletteHandle } from '../lib/command-palette-ui';
+import { TIMELINE_TIP_IDS } from '../lib/conversation-timeline-filter';
+import { normalizeChecks } from '../lib/checks';
+import { listFileExtensions, formatFileExtensionLabel, toggleFileExtension } from '../lib/file-tree';
+import { listReviewAuthorsFromComments } from '../lib/diff-review-filter';
+import { buildStackBranchSelectOptions, stackBranchHasPathPicker } from '../lib/ui-polish';
 import { installPrModalMutations, installReviewActions, installSideActions } from '../commands';
 import { useCommandContext } from '../hooks/useCommandContext';
 import { usePrModalHotkeys } from '../hooks/usePrModalHotkeys';
@@ -982,6 +988,8 @@ export function PrModalApp({
   // paletteQuery: CommandPalette leaf-subscribes (no App value-subscribe).
   const setPaletteQuery = useModalStore((s) => s.setPaletteQuery);
   const [paletteHelpOpen, setPaletteHelpOpen] = useState(false);
+  const paletteComposerRef = useRef<Element | null>(null);
+  const conversationPaletteRef = useRef<ConversationPaletteHandle | null>(null);
   const picker = useModalStore((s) => s.picker);
   const setPicker = useModalStore((s) => s.setPicker);
   const [theme, setTheme] = useState(() =>
@@ -3288,6 +3296,14 @@ export function PrModalApp({
         onRemoveAssignee,
         openLabelPicker,
         onRefresh: refreshDetail,
+        onDeleteHeadBranch,
+        appLocale,
+        overlay: overlayRef.current,
+        runPaletteUiCommand: (id: string, expectedControl?: HTMLElement) => {
+          const command = getPaletteUiCommands().get(id);
+          // Don't redirect actions to a different comment or draft after a rerender.
+          if (command && command.payload?.control === expectedControl) command.run();
+        },
         onLeaveReviewAction,
         onClosePr,
         onReopenPr,
@@ -3358,22 +3374,164 @@ export function PrModalApp({
     );
   }
 
-  const paletteCommands = useMemo(() => {
-    if (typeof buildPaletteCommands !== 'function') return [];
-    const canVerdict =
-      typeof canSubmitReviewVerdict === 'function'
-        ? canSubmitReviewVerdict(detail)
-        : true;
-    return buildPaletteCommands(detail || {}, {
+  function getPaletteUiCommands(controls = readPaletteControls()) {
+    const commands = new Map<string, {
+      id: string; section: string; action: string; renderKey?: string; title?: string;
+      keywords?: string[]; payload?: { control: HTMLElement }; run: () => void;
+    }>();
+    const overlay = overlayRef.current;
+    const panel = overlay?.querySelector<HTMLElement>('.prp-body-panel--active');
+    if (!detail || !panel) return commands;
+    const diff = layoutMode === LAYOUT_DIFF;
+    const add = (id: string, section: string, run: () => void, keywords?: string[], renderKey?: string, title?: string, control?: HTMLElement) => {
+      commands.set(id, { id, section, action: 'paletteUi', keywords, renderKey, title, run,
+        payload: control ? { control } : undefined });
+    };
+    const t = (key: string) => formatMessage(key, appLocale);
+    const pick = (titleKey: string, options: { id: string; label: string }[], onPick: (id: string) => void) => {
+      const title = t(titleKey);
+      setPicker({ type: 'palette', title, options, query: '', allowFreeText: false, placeholder: title,
+        onPick: (option: { id: string }) => { closePicker(); onPick(option.id); },
+      });
+    };
+    if (showShellToggleChrome && !diff) add('switch-shell', 'Navigate', onToggleShell, ['modal', 'sheet', 'layout']);
+    if (showRestoreNativeChrome) add('restore-native', 'Navigate', () => onRestoreNative?.(), ['github', 'native', 'restore', 'embed']);
+    if (showCloseChrome) add('close-panel', 'Navigate', requestClose, ['close', 'modal', 'sheet']);
+
+    if (diff) {
+      if (!isAllCommitsFilter(diffCommitFilter) && !diffCommitLoading) {
+        add('reset-commits', 'Diff', () => void applyDiffCommitFilter({ mode: 'all' }), ['reset', 'commits', 'range']);
+      }
+      if (fileNav.collapsed) {
+        add('search-file-tree', 'Diff', () => {
+          onToggleFileNavCollapse();
+          requestAnimationFrame(() => panel.querySelector<HTMLElement>('.prp-filetree__search-input')?.focus());
+        }, ['find', 'file', 'path']);
+      }
+      add('filter-unread-files', 'Diff', () => setFileUnreadOnly((v) => !v), ['unread', 'viewed', 'file']);
+      add('filter-commented-files', 'Diff', () => setFileCommentedOnly((v) => !v), ['commented', 'file']);
+      const ext = [...new Set([...listFileExtensions(reviewScopedFiles, { max: 10 }), ...fileExtFilter])];
+      if (ext.length) {
+        add('filter-file-extension', 'Diff', () => {
+          pick('palette_cmd_filter_file_extension', ext.map((id) => ({ id, label: `${fileExtFilter.has(id) ? '✓ ' : ''}${formatFileExtensionLabel(id)}` })),
+            (id) => setFileExtFilter((prev) => toggleFileExtension(prev, id)));
+        }, ['file', 'extension', ...ext]);
+      }
+      const authors = listReviewAuthorsFromComments(detail.reviewComments || []);
+      if (authors.length) {
+        const selected = new Set(normalizeDiffReviewFilter(diffReviewFilter).authors.map((author) => author.toLowerCase()));
+        add('filter-review-author', 'Diff', () => {
+          pick('palette_cmd_filter_review_author', authors.map(({ login }) => ({
+            id: login.toLowerCase(), label: `${selected.has(login.toLowerCase()) ? '✓ ' : ''}@${login}`,
+          })), (id) => {
+            if (selected.has(id)) selected.delete(id);
+            else selected.add(id);
+            patchDiffReviewFilter({ authors: [...selected] });
+          });
+        }, ['review', 'author', 'reviewed by', ...authors.map(({ login }) => login)]);
+      }
+      add('word-highlight', 'Diff', () => applyWordHighlight(!wordHighlight), ['highlight', 'word'], 'highlight_diff_words');
+      add('word-strike', 'Diff', () => applyWordStrike(!wordStrike), ['strike', 'deleted', 'word'], 'strike_deleted_words');
+      add('dim-unfocused', 'Diff', () => applyDimUnfocusedFiles(!dimUnfocusedFiles), ['dim', 'unfocused', 'file'], 'dim_unfocused_files');
+      if (expandHunkAtCaret('fromEnd', false)) add('expand-hunk-up', 'Diff', () => expandHunkAtCaret('fromEnd'), ['hunk', 'context', 'up']);
+      if (expandHunkAtCaret('fromStart', false)) add('expand-hunk-down', 'Diff', () => expandHunkAtCaret('fromStart'), ['hunk', 'context', 'down']);
+    } else {
+      const conversation = conversationPaletteRef.current;
+      if (conversation) {
+        for (const kind of TIMELINE_TIP_IDS) {
+          add(`timeline-${kind}`, 'Conversation', () => conversation.toggleTimelineTip(kind),
+            ['filter', 'timeline', kind], undefined,
+            formatMessage('palette_cmd_filter_timeline', appLocale, { kind: t(PALETTE_TIMELINE_KINDS[kind]) }));
+        }
+        if (conversation.canLoadMore) {
+          add('load-all-threads', 'Conversation', () => loadMoreReviewThreads('all'), ['load', 'all', 'comments', 'threads']);
+        }
+      }
+      for (const [section, id] of [['commits', 'search-commits'], ['tags', 'search-tags'], ['files', 'search-aside-files']]) {
+        add(id, 'Conversation', () => openPaletteAsideSection(panel, section), ['sidebar', 'search', section]);
+      }
+      // Expand the compact rail first, so links resolve to the same controls as in the full aside.
+      const addAsideLinks = (id: string, selector: string, available: boolean, keywords: string[]) => {
+        const collapsed = panel.querySelector('.prp-conversation__aside--collapsed');
+        if (!readPaletteLinks(panel, selector).length && !(available && collapsed)) return;
+        add(id, 'Conversation', () => {
+          const pickLinks = () => {
+            const rows = readPaletteLinks(panel, selector);
+            if (!rows.length) return;
+            pick(`palette_cmd_${id.replace(/-/g, '_')}`, rows.map(({ label }, i) => ({ id: String(i), label })),
+              (key) => rows[Number(key)]?.link.click());
+          };
+          if (collapsed) {
+            panel.querySelector<HTMLElement>('.prp-aside-collapse-btn')?.click();
+            requestAnimationFrame(pickLinks);
+          } else pickLinks();
+        }, keywords);
+      };
+      addAsideLinks('open-linked-item', '.prp-aside-dev__badge-main', Boolean(detail.developmentIssues?.length || detail.linkedIssues?.length), ['linked', 'issue', 'pull request']);
+      const checks = normalizeChecks(detail.checks);
+      addAsideLinks('open-check-details', '[data-prp-aside-section="checks"] .prp-checks-link', Boolean(
+        checks.statuses.some((s: any) => s.target_url || s.targetUrl) ||
+        checks.checkRuns.some((r: any) => r.html_url || r.htmlUrl || r.details_url || r.detailsUrl)
+      ), ['ci', 'check', 'status', 'details']);
+    }
+    for (const [id, control] of controls) {
+      const section = id === 'search-load-comments' ? (diff ? 'Diff' : 'Conversation') :
+        id === 'filter-commits' || id === 'search-file-tree' ? 'Diff' : 'Review';
+      add(id, section,
+        () => activatePaletteControl(control, id === 'search-file-tree', id === 'search-file-tree' || id === 'comment-react'),
+        id.split('-'), undefined, undefined, control);
+    }
+    const paths = stackPath.branches.flatMap((branch: any) => stackBranchHasPathPicker(branch)
+      ? buildStackBranchSelectOptions(branch).filter((opt: any) => !opt.meta.selected && opt.meta.number !== detail.number)
+      : []);
+    if (paths.length && typeof onOpenStackPr === 'function') {
+      add('open-stack-path', 'Stack', () => {
+        const options = [...new Map(paths.map((option: any) => [option.id, option])).values()] as { id: string; label: string }[];
+        pick('palette_cmd_open_stack_path', options, (id) => openStackOrListPr(Number(id)));
+      }, ['stack', 'fork', 'path', 'branch']);
+    }
+    return commands;
+  }
+
+  function readPaletteControls() {
+    return collectPaletteControls(overlayRef.current, hasServerPending, paletteComposerRef.current);
+  }
+
+  function readPaletteCommands() {
+    if (!detail) return [];
+    const controls = readPaletteControls();
+    const uiCommands = getPaletteUiCommands(controls);
+    const diff = layoutMode === LAYOUT_DIFF;
+    return buildPaletteCommands(detail, {
       stackItems,
       openPulls: Array.isArray(openPulls) ? openPulls : [],
-      canSubmitReviewVerdict: canVerdict,
-      // Diff-only commands (file nav, selection, filters, viewed…)
-      layoutMode: layoutMode === LAYOUT_DIFF ? 'diff' : 'centered',
+      canSubmitReviewVerdict: canSubmitReviewVerdict(detail),
+      layoutMode: diff ? 'diff' : 'centered',
       isEmbed,
       locale: appLocale,
+      uiCommands: [...uiCommands.values()].map(({ run, renderKey, title, ...cmd }) => ({
+        ...cmd, title: renderKey ? formatMessage(renderKey, appLocale) : title, localizedTitle: Boolean(renderKey || title),
+      })),
+      isCommandAvailable(cmd: any) {
+        switch (cmd.id) {
+          case 'load-more-threads': return !diff && Boolean(conversationPaletteRef.current?.canLoadMore);
+          case 'discard-pending-review': return hasServerPending && !actionBusy;
+          case 'diff-expand-hunk': return expandHunkAtCaret('all', false);
+          case 'diff-sel-copy-code':
+          case 'diff-sel-copy-url':
+          case 'diff-sel-comment': return Boolean(useModalStore.getState().lineSelection);
+          case 'close-pr': return detail.state === 'open' && !detail.merged && !actionBusy;
+          case 'reopen-pr': return detail.state === 'closed' && !detail.merged && !actionBusy;
+          case 'edit-body':
+          case 'edit-title':
+          case 'set-base':
+          case 'delete-head-branch': return !actionBusy;
+          case 'update-branch': return canUpdateBranch(detail) && !actionBusy;
+          default: return true;
+        }
+      },
     });
-  }, [detail, stackItems, openPulls, layoutMode, isEmbed, appLocale]);
+  }
 
   /** Async PR search boundary for palette `#…` mode (injectable fetch). */
   const searchPalettePrs = useCallback(
@@ -4444,6 +4602,11 @@ export function PrModalApp({
     <LocaleProvider uiLanguage={prefs?.uiLanguage ?? uiLanguagePref}>
     <div
       ref={overlayRef}
+      onFocusCapture={(event) => {
+        if (!event.target.closest('.prp-pp-layer')) {
+          paletteComposerRef.current = event.target.closest(PALETTE_COMPOSER);
+        }
+      }}
       className={`prp-overlay ${
         isEmbed ? 'prp-shell--embed' : shellClassName(shellMode)
       } ${fsCls}${
@@ -4667,6 +4830,7 @@ export function PrModalApp({
             }}
             reverseComments={reverseComments}
             timelineVisibility={timelineVisibility}
+            paletteHandleRef={conversationPaletteRef}
             onTimelineVisibilityChange={
               typeof onTimelineVisibilityChange === 'function'
                 ? onTimelineVisibilityChange
@@ -4906,7 +5070,7 @@ export function PrModalApp({
           open={paletteOpen}
           query={undefined /* leaf store */}
           onQuery={setPaletteQuery}
-          commands={paletteCommands}
+          readCommands={readPaletteCommands}
           openPulls={Array.isArray(openPulls) ? openPulls : []}
           searchPrs={searchPalettePrs}
           helpOpen={paletteHelpOpen}

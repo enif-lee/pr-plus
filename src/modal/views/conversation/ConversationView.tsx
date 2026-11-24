@@ -3,7 +3,7 @@
  * Complete TypeScript module (no mid-IIFE parts assembly).
  * Domain tsc typechecks this file. Size exception: undivided React root.
  */
-import React, { useEffect, useMemo, useRef, useState, memo, useCallback } from 'react';
+import React, { useEffect, useImperativeHandle, useMemo, useRef, useState, memo, useCallback } from 'react';
 import { Button } from '@common/Button';
 import { Badge } from '@common/Badge';
 import { Card } from '@common/Card';
@@ -250,6 +250,7 @@ function ConversationViewImpl(props: any) {
     timelineVisibility = null,
     /** (nextMap) => void — patch global prefs when a tip is toggled */
     onTimelineVisibilityChange = null,
+    paletteHandleRef = null,
     /** (method) => void — persist merge box pick as next default */
     onMergeMethodChange = null,
     /** extensionPrefs.lastMergeMethod — merge box default for this PR. */
@@ -624,6 +625,12 @@ function ConversationViewImpl(props: any) {
       gapPlacement: threadGap.gapPlacement || 'end',
     };
   }, [timelineItems, threadGap]);
+
+  // The timeline controls are virtual rows and may be unmounted while scrolling.
+  useImperativeHandle(paletteHandleRef, () => ({
+    toggleTimelineTip: onTipClick,
+    canLoadMore: paged.showThreadGap && !actionBusy && typeof onLoadMoreReviewThreads === 'function',
+  }));
 
   // E2E / host observability: Load-more fold state (TLM.1)
   useEffect(() => {
@@ -2771,11 +2778,12 @@ function ConversationViewImpl(props: any) {
           <CommentsSummary detail={detail} />
         </AsideSection>
         {showChecks || pendingChecks ? (
-          <AsideSection title={t('meta_checks')} loading={pendingChecks && !showChecks}>
+          <AsideSection title={t('meta_checks')} loading={pendingChecks && !showChecks} data-prp-aside-section="checks">
             {showChecks ? <ChecksPanel checks={detail.checks} /> : null}
           </AsideSection>
         ) : null}
         <AsideSection
+          data-prp-aside-section="tags"
           title={`${t('meta_tags')}${
             Array.isArray(prTags) && prTags.length ? ` (${prTags.length})` : ''
           }`}
@@ -2797,6 +2805,7 @@ function ConversationViewImpl(props: any) {
           />
         </AsideSection>
         <AsideSection
+          data-prp-aside-section="commits"
           title={`Commits${
             detail.commitsCount != null
               ? ` (${detail.commitsCount})`
@@ -2826,6 +2835,7 @@ function ConversationViewImpl(props: any) {
           />
         </AsideSection>
         <AsideSection
+          data-prp-aside-section="files"
           title={`Files${
             detail.changedFiles != null
               ? ` (${detail.changedFiles})`

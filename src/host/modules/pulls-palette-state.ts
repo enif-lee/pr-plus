@@ -24,6 +24,12 @@
     return (globalThis as any).PRPullsPalette || null;
   }
 
+  function pullsTreeToggleTitle() {
+    return document.getElementById('pr-tree-toggle')
+      ? pullsPaletteMsg('palette_cmd_toggle_pulls_tree', 'Switch between stack tree and default PR list')
+      : null;
+  }
+
   function isPullsPaletteOpen() {
     return Boolean(pullsPaletteOpen);
   }
@@ -89,6 +95,7 @@
         asyncHits: pullsPalettePrSearchAsyncHits,
         prSearchLoading: pullsPalettePrSearchLoading,
         prSearchError: pullsPalettePrSearchError,
+        treeToggleTitle: pullsTreeToggleTitle(),
       });
     } else {
       pullsPaletteItems = [];
